@@ -18,7 +18,6 @@ import (
 )
 
 var inputsBucket *storage.BucketHandle
-var firestoreClient *firestore.Client
 var transitionTopic *pubsub.Topic
 var fsTaskCollection *firestore.CollectionRef
 
@@ -26,29 +25,33 @@ func init() {
 	projectID := os.Getenv("GCP_PROJECT")
 	ctx := context.Background()
 
-	// Creates a client.
-	storageClient, err := storage.NewClient(ctx)
-	if err != nil {
-		log.Fatalf("Failed to create storage client: %v", err)
+	// database
+	{
+		firestoreClient, err := firestore.NewClient(ctx, projectID)
+		if err != nil {
+			log.Fatalf("Failed to create firestore client: %v", err)
+		}
+		fsTaskCollection = firestoreClient.Collection("transition_task")
 	}
 
-	firestoreClient, err = firestore.NewClient(ctx, projectID)
-	if err != nil {
-		log.Fatalf("Failed to create firestore client: %v", err)
+	// pubsub
+	{
+		pubsubClient, err := pubsub.NewClient(ctx, projectID)
+		if err != nil {
+			log.Fatalf("Failed to create pubsub client: %v", err)
+		}
+		transitionTopic = pubsubClient.Topic("transition")
 	}
-	fsTaskCollection = firestoreClient.Collection("transition_task")
 
-	pubsubClient, err := pubsub.NewClient(ctx, projectID)
-	if err != nil {
-		log.Fatalf("Failed to create pubsub client: %v", err)
+	// storage
+	{
+		storageClient, err := storage.NewClient(ctx)
+		if err != nil {
+			log.Fatalf("Failed to create storage client: %v", err)
+		}
+
+		inputsBucket = storageClient.Bucket("transition_inputs")
 	}
-	transitionTopic = pubsubClient.Topic("transition")
-
-	// Sets the name for the new bucket.
-	bucketName := "transition_inputs"
-
-	// Creates a Bucket instance.
-	inputsBucket = storageClient.Bucket(bucketName)
 }
 
 // 10 MB
