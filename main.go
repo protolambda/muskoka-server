@@ -1,4 +1,4 @@
-package muskoka_server
+package main
 
 import (
 	"context"

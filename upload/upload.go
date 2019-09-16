@@ -2,7 +2,7 @@ package upload
 
 import (
 	"bytes"
-	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
 	"context"
@@ -12,17 +12,18 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"regexp"
 	"time"
 )
 
 var inputsBucket *storage.BucketHandle
-var datastoreClient *datastore.Client
+var firestoreClient *firestore.Client
 var transitionTopic *pubsub.Topic
-const dsTaskKind = "transition_task"
-var projectID string = "TODO"//TODO
+var fsTaskCollection *firestore.CollectionRef
 
 func init() {
+	projectID := os.Getenv("GCP_PROJECT")
 	ctx := context.Background()
 
 	// Creates a client.
@@ -31,10 +32,11 @@ func init() {
 		log.Fatalf("Failed to create storage client: %v", err)
 	}
 
-	datastoreClient, err = datastore.NewClient(ctx, projectID)
+	firestoreClient, err = firestore.NewClient(ctx, projectID)
 	if err != nil {
-		log.Fatalf("Failed to create datastore client: %v", err)
+		log.Fatalf("Failed to create firestore client: %v", err)
 	}
+	fsTaskCollection = firestoreClient.Collection("transition_task")
 
 	pubsubClient, err := pubsub.NewClient(ctx, projectID)
 	if err != nil {
@@ -60,9 +62,9 @@ const (
 )
 
 func (s status) report(w http.ResponseWriter, msg string) {
+	w.WriteHeader(int(s))
 	log.Println(msg)
 	_, _ = fmt.Fprintln(w, msg)
-	w.WriteHeader(int(s))
 }
 
 func (s status) check(w http.ResponseWriter, err error, msg string) bool {
@@ -78,23 +80,24 @@ func (s status) check(w http.ResponseWriter, err error, msg string) bool {
 }
 
 type Task struct {
-	Blocks int
-	SpecVersion string
-	Created time.Time
+	Blocks      int `firestore:"blocks"`
+	SpecVersion string `firestore:"spec-version"`
+	Created     time.Time `firestore:"created"`
+	Status      string `firestore:"status"`
 }
 
 type TransitionMsg struct {
-	Blocks int `json:"blocks"`
+	Blocks      int    `json:"blocks"`
 	SpecVersion string `json:"spec-version"`
-	Key string `json:"key"`
+	Key         string `json:"key"`
 }
 
 var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-]")
 
 func Upload(w http.ResponseWriter, r *http.Request) {
-	specVersion := r.Header.Get("spec-version")
+	specVersion := r.FormValue("spec-version")
 	if specVersion == "" {
-		BAD.report(w, "spec version is not specified. Set the \"spec-version\" header.")
+		BAD.report(w, "spec version is not specified. Set the \"spec-version\" form value.")
 		return
 	}
 	if len(specVersion) > 10 {
@@ -124,24 +127,32 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	if pre, ok := r.MultipartForm.File["pre"]; !ok {
 		BAD.report(w, "no pre-state was specified")
 		return
-	} else 	if len(pre) != 1 {
+	} else if len(pre) != 1 {
 		BAD.report(w, "need exactly one pre-state file")
 		return
 	}
 
 	blocks := r.MultipartForm.File["blocks"]
 
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-	task := &Task{
-		Blocks:      len(blocks),
-		SpecVersion: specVersion,
-		Created:     time.Now(),
+	doc := fsTaskCollection.NewDoc()
+
+	// store task in firestore
+	{
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		task := &Task{
+			Blocks:      len(blocks),
+			SpecVersion: specVersion,
+			Created:     time.Now(),
+			Status:      "started",
+		}
+		_, err := doc.Set(ctx, task)
+
+		if BAD.check(w, err, "failed to register task.") {
+			return
+		}
 	}
-	key, err := datastoreClient.Put(ctx, datastore.IncompleteKey(dsTaskKind, nil), task)
-	if BAD.check(w, err, "could not register task entry") {
-		return
-	}
-	keyStr := key.Encode()
+
+	keyStr := doc.ID
 	// TODO proper full json response
 	_, err = fmt.Fprintf(w, "key: %s", keyStr)
 	w.WriteHeader(200)
@@ -168,8 +179,20 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if failedUpload {
-		// TODO mark datastore entry as failed
-	} else {
+		// mark firestore entry as failed
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		task := &Task{
+			Status:      "failed",
+		}
+		_, err := doc.Set(ctx, task, firestore.Merge([]string{"status"}))
+		if err != nil {
+			log.Printf("upload to bucket failed, and then marking the task as 'failed' failed...")
+		}
+		return
+	}
+
+	// fire pubsub event
+	{
 		trMsg := &TransitionMsg{
 			Blocks:      len(blocks),
 			SpecVersion: specVersion,
@@ -182,7 +205,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		<- transitionTopic.Publish(ctx, &pubsub.Message{
+		<-transitionTopic.Publish(ctx, &pubsub.Message{
 			Data: buf.Bytes(),
 		}).Ready()
 	}
