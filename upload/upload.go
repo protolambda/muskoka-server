@@ -60,8 +60,9 @@ const maxUploadMem = 10 * (1 << 20)
 type status int
 
 const (
-	OK  status = 200
-	BAD status = 500
+	SERVER_OK        status = 200
+	SERVER_ERR       status = 500
+	SERVER_BAD_INPUT status = 400
 )
 
 func (s status) report(w http.ResponseWriter, msg string) {
@@ -83,10 +84,10 @@ func (s status) check(w http.ResponseWriter, err error, msg string) bool {
 }
 
 type Task struct {
-	Blocks      int `firestore:"blocks"`
-	SpecVersion string `firestore:"spec-version"`
+	Blocks      int       `firestore:"blocks"`
+	SpecVersion string    `firestore:"spec-version"`
 	Created     time.Time `firestore:"created"`
-	Status      string `firestore:"status"`
+	Status      string    `firestore:"status"`
 }
 
 type TransitionMsg struct {
@@ -95,24 +96,28 @@ type TransitionMsg struct {
 	Key         string `json:"key"`
 }
 
+type UploadResponse struct {
+	Key string `json:"key"`
+}
+
 var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-]")
 
 func Upload(w http.ResponseWriter, r *http.Request) {
 	specVersion := r.FormValue("spec-version")
 	if specVersion == "" {
-		BAD.report(w, "spec version is not specified. Set the \"spec-version\" form value.")
+		SERVER_BAD_INPUT.report(w, "spec version is not specified. Set the \"spec-version\" form value.")
 		return
 	}
 	if len(specVersion) > 10 {
-		BAD.report(w, "spec version is too long")
+		SERVER_BAD_INPUT.report(w, "spec version is too long")
 		return
 	}
 	if !versionRegex.Match([]byte(specVersion)) {
-		BAD.report(w, "spec version is invalid")
+		SERVER_BAD_INPUT.report(w, "spec version is invalid")
 		return
 	}
 	err := r.ParseMultipartForm(maxUploadMem)
-	if BAD.check(w, err, "cannot parse multipart upload") {
+	if SERVER_BAD_INPUT.check(w, err, "cannot parse multipart upload") {
 		return
 	}
 	defer func() {
@@ -122,16 +127,16 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if blocks, ok := r.MultipartForm.File["blocks"]; !ok {
-		BAD.report(w, "no blocks were specified")
+		SERVER_BAD_INPUT.report(w, "no blocks were specified")
 		return
 	} else if len(blocks) > 16 {
-		BAD.report(w, fmt.Sprintf("cannot process high amount of blocks; %v", len(blocks)))
+		SERVER_BAD_INPUT.report(w, fmt.Sprintf("cannot process high amount of blocks; %v", len(blocks)))
 	}
 	if pre, ok := r.MultipartForm.File["pre"]; !ok {
-		BAD.report(w, "no pre-state was specified")
+		SERVER_BAD_INPUT.report(w, "no pre-state was specified")
 		return
 	} else if len(pre) != 1 {
-		BAD.report(w, "need exactly one pre-state file")
+		SERVER_BAD_INPUT.report(w, "need exactly one pre-state file")
 		return
 	}
 
@@ -150,15 +155,21 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err := doc.Set(ctx, task)
 
-		if BAD.check(w, err, "failed to register task.") {
+		if SERVER_ERR.check(w, err, "failed to register task.") {
 			return
 		}
 	}
 
 	keyStr := doc.ID
-	w.WriteHeader(200)
-	// TODO proper full json response
-	_, err = fmt.Fprintf(w, "key: %s", keyStr)
+	w.WriteHeader(int(SERVER_OK))
+	resp := &UploadResponse{
+		Key: keyStr,
+	}
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(resp); err != nil {
+		log.Printf("failed to encode json response")
+		return
+	}
 
 	// TODO: could return to response faster by putting remainder in go routine
 
@@ -185,7 +196,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		// mark firestore entry as failed
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		task := &Task{
-			Status:      "failed",
+			Status: "failed",
 		}
 		_, err := doc.Set(ctx, task, firestore.Merge([]string{"status"}))
 		if err != nil {
