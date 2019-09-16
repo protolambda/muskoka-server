@@ -153,9 +153,9 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyStr := doc.ID
+	w.WriteHeader(200)
 	// TODO proper full json response
 	_, err = fmt.Fprintf(w, "key: %s", keyStr)
-	w.WriteHeader(200)
 
 	// TODO: could return to response faster by putting remainder in go routine
 
