@@ -1,20 +1,26 @@
 package upload
 
 import (
+	"bytes"
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
+	"regexp"
 	"time"
 )
 
 var inputsBucket *storage.BucketHandle
 var datastoreClient *datastore.Client
-const dsTaskKind = "task"
+var transitionTopic *pubsub.Topic
+const dsTaskKind = "transition_task"
+var projectID string = "TODO"//TODO
 
 func init() {
 	ctx := context.Background()
@@ -25,13 +31,19 @@ func init() {
 		log.Fatalf("Failed to create storage client: %v", err)
 	}
 
-	datastoreClient, err = datastore.NewClient(ctx, datastore.DetectProjectID)
+	datastoreClient, err = datastore.NewClient(ctx, projectID)
 	if err != nil {
 		log.Fatalf("Failed to create datastore client: %v", err)
 	}
 
+	pubsubClient, err := pubsub.NewClient(ctx, projectID)
+	if err != nil {
+		log.Fatalf("Failed to create pubsub client: %v", err)
+	}
+	transitionTopic = pubsubClient.Topic("transition")
+
 	// Sets the name for the new bucket.
-	bucketName := "pre-states"
+	bucketName := "transition_inputs"
 
 	// Creates a Bucket instance.
 	inputsBucket = storageClient.Bucket(bucketName)
@@ -71,6 +83,14 @@ type Task struct {
 	Created time.Time
 }
 
+type TransitionMsg struct {
+	Blocks int `json:"blocks"`
+	SpecVersion string `json:"spec-version"`
+	Key string `json:"key"`
+}
+
+var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-]")
+
 func Upload(w http.ResponseWriter, r *http.Request) {
 	specVersion := r.Header.Get("spec-version")
 	if specVersion == "" {
@@ -79,6 +99,10 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(specVersion) > 10 {
 		BAD.report(w, "spec version is too long")
+		return
+	}
+	if !versionRegex.Match([]byte(specVersion)) {
+		BAD.report(w, "spec version is invalid")
 		return
 	}
 	err := r.ParseMultipartForm(maxUploadMem)
@@ -118,20 +142,49 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keyStr := key.Encode()
+	// TODO proper full json response
 	_, err = fmt.Fprintf(w, "key: %s", keyStr)
+	w.WriteHeader(200)
 
+	// TODO: could return to response faster by putting remainder in go routine
+
+	failedUpload := false
 	// parse and store header
 	preUpload := r.MultipartForm.File["pre"][0]
 	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
-	if BAD.check(w, copyUploadToBucket(preUpload, keyStr+"/pre.ssz"), "could not handle uploaded state") {
-		return
+	if err := copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"); err != nil {
+		log.Printf("could not upload pre-state: %v", err)
+		failedUpload = false
 	}
-	// parse and store blocks
-	for i, b := range blocks {
-		log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
-		if BAD.check(w, copyUploadToBucket(b, keyStr+fmt.Sprintf("/block_%d.ssz", i)), fmt.Sprintf("could not handle uploaded block %d", i)) {
+	if !failedUpload {
+		// parse and store blocks
+		for i, b := range blocks {
+			log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
+			if err := copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)); err != nil {
+				log.Printf(fmt.Sprintf("could not handle uploaded block %d: %v", i, err))
+				failedUpload = true
+				break
+			}
+		}
+	}
+	if failedUpload {
+		// TODO mark datastore entry as failed
+	} else {
+		trMsg := &TransitionMsg{
+			Blocks:      len(blocks),
+			SpecVersion: specVersion,
+			Key:         keyStr,
+		}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		if err := enc.Encode(trMsg); err != nil {
+			log.Printf("failed to emit event, could not encode task to JSON: %v, err: %v", trMsg, err)
 			return
 		}
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		<- transitionTopic.Publish(ctx, &pubsub.Message{
+			Data: buf.Bytes(),
+		}).Ready()
 	}
 }
 
