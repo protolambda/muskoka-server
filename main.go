@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/gorilla/mux"
+	"github.com/protolambda/muskoka-server/results"
 	"github.com/protolambda/muskoka-server/upload"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ func main() {
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.HandleFunc("/upload", upload.Upload)
+	r.HandleFunc("/results", results.Results)
 	r.Handle("/", fs)
 	// Add routes as needed
 
