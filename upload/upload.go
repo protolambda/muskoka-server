@@ -50,7 +50,7 @@ func init() {
 			log.Fatalf("Failed to create storage client: %v", err)
 		}
 
-		inputsBucket = storageClient.Bucket("transition_inputs")
+		inputsBucket = storageClient.Bucket("transitions")
 	}
 }
 

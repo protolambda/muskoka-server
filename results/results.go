@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	gcreds "golang.org/x/oauth2/google"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"log"
 	"mime/multipart"
@@ -17,7 +19,7 @@ import (
 )
 
 var inputsBucket *storage.BucketHandle
-var fsResultCollection *firestore.CollectionRef
+var fsResultCollection, fsTaskCollection *firestore.CollectionRef
 var createSignedStoragePutUrl func(name string) (string, error)
 
 func init() {
@@ -31,6 +33,7 @@ func init() {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
 		fsResultCollection = firestoreClient.Collection("transition_result")
+		fsTaskCollection = firestoreClient.Collection("transition_task")
 	}
 
 	{
@@ -43,7 +46,7 @@ func init() {
 			log.Fatalf("failed to parse default credentials")
 		}
 		createSignedStoragePutUrl = func(name string) (string, error) {
-			return storage.SignedURL("transition_results", name, &storage.SignedURLOptions{
+			return storage.SignedURL("transitions", name, &storage.SignedURLOptions{
 				Scheme:         storage.SigningSchemeV4,
 				Method:         "PUT",
 				GoogleAccessID: conf.Email,
@@ -64,21 +67,21 @@ func init() {
 	}
 }
 
-type status int
+type statCode int
 
 const (
-	SERVER_OK        status = 200
-	SERVER_ERR       status = 500
-	SERVER_BAD_INPUT status = 400
+	SERVER_OK        statCode = 200
+	SERVER_ERR       statCode = 500
+	SERVER_BAD_INPUT statCode = 400
 )
 
-func (s status) report(w http.ResponseWriter, msg string) {
+func (s statCode) report(w http.ResponseWriter, msg string) {
 	w.WriteHeader(int(s))
 	log.Println(msg)
 	_, _ = fmt.Fprintln(w, msg)
 }
 
-func (s status) check(w http.ResponseWriter, err error, msg string) bool {
+func (s statCode) check(w http.ResponseWriter, err error, msg string) bool {
 	if err != nil {
 		log.Println(msg)
 		log.Println(err)
@@ -88,6 +91,13 @@ func (s status) check(w http.ResponseWriter, err error, msg string) bool {
 	} else {
 		return false
 	}
+}
+
+type Task struct {
+	Blocks      int       `firestore:"blocks"`
+	SpecVersion string    `firestore:"spec-version"`
+	Created     time.Time `firestore:"created"`
+	Status      string    `firestore:"status"`
 }
 
 type ResultEntry struct {
@@ -118,6 +128,8 @@ type ResponseMsg struct {
 var rootRegex, _ = regexp.Compile("0x[0-9a-f]{64}")
 
 func Results(w http.ResponseWriter, r *http.Request) {
+	// TODO check client auth
+
 	dec := json.NewDecoder(r.Body)
 	var result ResultMsg
 	if SERVER_BAD_INPUT.check(w, dec.Decode(&result), "could not decode result input") {
@@ -134,13 +146,26 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO check if key exists (do not create results for tasks that do not exist)
+	// checks if the task key exists, and retrieves the task information
+	var task Task
+	{
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		taskDoc, err := fsTaskCollection.Doc(result.Key).Get(ctx)
+		if status.Code(err) == codes.NotFound || (err == nil && !taskDoc.Exists()) {
+			SERVER_BAD_INPUT.report(w, "task does not exist, cannot process result")
+			return
+		}
+		if SERVER_ERR.check(w, err, "failed to lookup task") {
+			return
+		}
+		if SERVER_ERR.check(w, taskDoc.DataTo(&task), "failed to parse task") {
+			return
+		}
+	}
 
-	// TODO check client auth
+	resultDoc := fsResultCollection.NewDoc()
 
-	doc := fsResultCollection.NewDoc()
-
-	// store task in firestore
+	// store task result in firestore
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		resultEntry := &ResultEntry{
@@ -150,7 +175,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 			ClientVersion: result.ClientVersion,
 			StateRoot:     result.StateRoot,
 		}
-		_, err := doc.Set(ctx, resultEntry)
+		_, err := resultDoc.Set(ctx, resultEntry)
 
 		if SERVER_ERR.check(w, err, "failed to register result.") {
 			return
@@ -161,22 +186,23 @@ func Results(w http.ResponseWriter, r *http.Request) {
 
 	// create signed urls to upload results to
 	{
+		path := fmt.Sprintf("%s/%s/%s/%s", task.SpecVersion, result.Key, result.ClientVersion, resultDoc.ID)
 		var err error
-		resp.PostStateURL, err = createSignedStoragePutUrl(fmt.Sprintf("%s~%s/post.ssz", result.Key, doc.ID))
+		resp.PostStateURL, err = createSignedStoragePutUrl(path+"/post.ssz")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
-		resp.ErrLogURL, err = createSignedStoragePutUrl(fmt.Sprintf("%s~%s/err_log.txt", result.Key, doc.ID))
+		resp.ErrLogURL, err = createSignedStoragePutUrl(path+"/err_log.txt")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
-		resp.OutLogURL, err = createSignedStoragePutUrl(fmt.Sprintf("%s~%s/out_log.txt", result.Key, doc.ID))
+		resp.OutLogURL, err = createSignedStoragePutUrl(path+"/out_log.txt")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
 	}
 
-	keyStr := doc.ID
+	keyStr := resultDoc.ID
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(resp); err != nil {
