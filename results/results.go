@@ -105,24 +105,24 @@ type ResultEntry struct {
 	Success       bool      `firestore:"success"`
 	Created       time.Time `firestore:"created"`
 	ClientVersion string    `firestore:"client-version"`
-	StateRoot     string    `firestore:"state-root"`
+	PostHash      string    `firestore:"post-hash"`
 }
 
 type ResultMsg struct {
 	// if the transition was successful (i.e. no err log)
 	Success bool `json:"success"`
-	// the hash-tree-root of the post-state
-	StateRoot string `json:"state-root"`
+	// the flat-hash of the post-state SSZ bytes, for quickly finding different results.
+	PostHash string `json:"post-hash"`
 	// identifies the client software running the transition
 	ClientVersion string `json:"client-version"`
 	// identifies the transition task
 	Key string `json:"key"`
 }
 
-type ResponseMsg struct {
+type ResultResponseMsg struct {
 	PostStateURL string `json:"post-state"`
-	ErrLogURL string `json:"err-log"`
-	OutLogURL string `json:"out-log"`
+	ErrLogURL    string `json:"err-log"`
+	OutLogURL    string `json:"out-log"`
 }
 
 var rootRegex, _ = regexp.Compile("0x[0-9a-f]{64}")
@@ -136,7 +136,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rootRegex.Match([]byte(result.StateRoot)) {
+	if !rootRegex.Match([]byte(result.PostHash)) {
 		SERVER_BAD_INPUT.report(w, "state root has invalid format")
 		return
 	}
@@ -173,7 +173,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 			Success:       result.Success,
 			Created:       time.Now(),
 			ClientVersion: result.ClientVersion,
-			StateRoot:     result.StateRoot,
+			PostHash:      result.PostHash,
 		}
 		_, err := resultDoc.Set(ctx, resultEntry)
 
@@ -182,21 +182,21 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := new(ResponseMsg)
+	respMsg := new(ResultResponseMsg)
 
 	// create signed urls to upload results to
 	{
 		path := fmt.Sprintf("%s/%s/%s/%s", task.SpecVersion, result.Key, result.ClientVersion, resultDoc.ID)
 		var err error
-		resp.PostStateURL, err = createSignedStoragePutUrl(path+"/post.ssz")
+		respMsg.PostStateURL, err = createSignedStoragePutUrl(path + "/post.ssz")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
-		resp.ErrLogURL, err = createSignedStoragePutUrl(path+"/err_log.txt")
+		respMsg.ErrLogURL, err = createSignedStoragePutUrl(path + "/err_log.txt")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
-		resp.OutLogURL, err = createSignedStoragePutUrl(path+"/out_log.txt")
+		respMsg.OutLogURL, err = createSignedStoragePutUrl(path + "/out_log.txt")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
 			return
 		}
@@ -205,7 +205,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	keyStr := resultDoc.ID
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
+	if err := enc.Encode(respMsg); err != nil {
 		log.Printf("could not encode response for task %s, result %s: %v", result.Key, keyStr, err)
 	}
 }
