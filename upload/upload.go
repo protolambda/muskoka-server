@@ -50,7 +50,7 @@ func init() {
 			log.Fatalf("Failed to create storage client: %v", err)
 		}
 
-		inputsBucket = storageClient.Bucket("transitions")
+		inputsBucket = storageClient.Bucket("muskoka-transitions")
 	}
 }
 
@@ -228,11 +228,18 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 func copyUploadToBucket(u *multipart.FileHeader, key string) error {
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	bucketW := inputsBucket.Object(key).NewWriter(ctx)
-	defer bucketW.Close()
 	f, err := u.Open()
-	defer f.Close()
+	if err != nil {
+		return fmt.Errorf("could not receive uploaded data for %s: %v", key, err)
+	}
 	if _, err = io.Copy(bucketW, f); err != nil {
-		return fmt.Errorf("could not store uploaded data %s: %v"+key, err)
+		return fmt.Errorf("could not store uploaded data %s: %v", key, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("could not close uploaded data file for %s: %v", key, err)
+	}
+	if err := bucketW.Close(); err != nil {
+		return fmt.Errorf("could not push uploaded data to cloud bucket for %s: %v", key, err)
 	}
 	return nil
 }

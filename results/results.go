@@ -9,16 +9,13 @@ import (
 	gcreds "golang.org/x/oauth2/google"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"io"
 	"log"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"regexp"
 	"time"
 )
 
-var inputsBucket *storage.BucketHandle
 var fsResultCollection, fsTaskCollection *firestore.CollectionRef
 var createSignedStoragePutUrl func(name string) (string, error)
 
@@ -43,10 +40,10 @@ func init() {
 		}
 		conf, err := gcreds.JWTConfigFromJSON(defaultCreds.JSON, storage.ScopeFullControl)
 		if err != nil {
-			log.Fatalf("failed to parse default credentials")
+			log.Fatalf("failed to parse default credentials: %v", err)
 		}
 		createSignedStoragePutUrl = func(name string) (string, error) {
-			return storage.SignedURL("transitions", name, &storage.SignedURLOptions{
+			return storage.SignedURL("muskoka-transitions", name, &storage.SignedURLOptions{
 				Scheme:         storage.SigningSchemeV4,
 				Method:         "PUT",
 				GoogleAccessID: conf.Email,
@@ -55,15 +52,6 @@ func init() {
 			})
 		}
 
-	}
-	// storage
-	{
-		storageClient, err := storage.NewClient(ctx)
-		if err != nil {
-			log.Fatalf("Failed to create storage client: %v", err)
-		}
-
-		inputsBucket = storageClient.Bucket("transition_outputs")
 	}
 }
 
@@ -137,7 +125,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !rootRegex.Match([]byte(result.PostHash)) {
-		SERVER_BAD_INPUT.report(w, "state root has invalid format")
+		SERVER_BAD_INPUT.report(w, "post hash has invalid format")
 		return
 	}
 
@@ -186,7 +174,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 
 	// create signed urls to upload results to
 	{
-		path := fmt.Sprintf("%s/%s/%s/%s", task.SpecVersion, result.Key, result.ClientVersion, resultDoc.ID)
+		path := fmt.Sprintf("%s/%s/results/%s/%s", task.SpecVersion, result.Key, result.ClientVersion, resultDoc.ID)
 		var err error
 		respMsg.PostStateURL, err = createSignedStoragePutUrl(path + "/post.ssz")
 		if SERVER_ERR.check(w, err, "could not create signed post state url") {
@@ -208,16 +196,4 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	if err := enc.Encode(respMsg); err != nil {
 		log.Printf("could not encode response for task %s, result %s: %v", result.Key, keyStr, err)
 	}
-}
-
-func copyUploadToBucket(u *multipart.FileHeader, key string) error {
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-	bucketW := inputsBucket.Object(key).NewWriter(ctx)
-	defer bucketW.Close()
-	f, err := u.Open()
-	defer f.Close()
-	if _, err = io.Copy(bucketW, f); err != nil {
-		return fmt.Errorf("could not store uploaded data %s: %v"+key, err)
-	}
-	return nil
 }

@@ -7,3 +7,6 @@
 
 # Test binary, build with `go test -c`
 *.test
+
+# keys for testing etc.
+*.key.json
