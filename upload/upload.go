@@ -19,7 +19,7 @@ import (
 
 var inputsBucket *storage.BucketHandle
 var transitionTopic *pubsub.Topic
-var fsTaskCollection *firestore.CollectionRef
+var fsTransitionsCollection *firestore.CollectionRef
 
 func init() {
 	projectID := os.Getenv("GCP_PROJECT")
@@ -31,7 +31,7 @@ func init() {
 		if err != nil {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
-		fsTaskCollection = firestoreClient.Collection("transition_task")
+		fsTransitionsCollection = firestoreClient.Collection("transitions")
 	}
 
 	// pubsub
@@ -50,7 +50,11 @@ func init() {
 			log.Fatalf("Failed to create storage client: %v", err)
 		}
 
-		inputsBucket = storageClient.Bucket("muskoka-transitions")
+		bucketName := "muskoka-transitions"
+		if envName := os.Getenv("TRANSITIONS_BUCKET"); envName != "" {
+			bucketName = envName
+		}
+		inputsBucket = storageClient.Bucket(bucketName)
 	}
 }
 
@@ -141,7 +145,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 
 	blocks := r.MultipartForm.File["blocks"]
 
-	doc := fsTaskCollection.NewDoc()
+	doc := fsTransitionsCollection.NewDoc()
 	keyStr := doc.ID
 
 	// parse and store header

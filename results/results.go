@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var fsResultCollection, fsTaskCollection *firestore.CollectionRef
+var fsTransitionsCollection *firestore.CollectionRef
 var createSignedStoragePutUrl func(name string) (string, error)
 
 func init() {
@@ -29,8 +29,7 @@ func init() {
 		if err != nil {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
-		fsResultCollection = firestoreClient.Collection("transition_result")
-		fsTaskCollection = firestoreClient.Collection("transition_task")
+		fsTransitionsCollection = firestoreClient.Collection("transitions")
 	}
 
 	{
@@ -42,8 +41,12 @@ func init() {
 		if err != nil {
 			log.Fatalf("failed to parse default credentials: %v", err)
 		}
+		bucketName := "muskoka-transitions"
+		if envName := os.Getenv("TRANSITIONS_BUCKET"); envName != "" {
+			bucketName = envName
+		}
 		createSignedStoragePutUrl = func(name string) (string, error) {
-			return storage.SignedURL("muskoka-transitions", name, &storage.SignedURLOptions{
+			return storage.SignedURL(bucketName, name, &storage.SignedURLOptions{
 				Scheme:         storage.SigningSchemeV4,
 				Method:         "PUT",
 				GoogleAccessID: conf.Email,
@@ -85,13 +88,12 @@ type Task struct {
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
 	Created     time.Time `firestore:"created"`
-	Status      string    `firestore:"status"`
 }
 
 type ResultEntry struct {
-	TaskKey       string    `firestore:"task-key"`
 	Success       bool      `firestore:"success"`
 	Created       time.Time `firestore:"created"`
+	ClientVendor  string    `firestore:"client-vendor"`
 	ClientVersion string    `firestore:"client-version"`
 	PostHash      string    `firestore:"post-hash"`
 }
@@ -101,7 +103,9 @@ type ResultMsg struct {
 	Success bool `json:"success"`
 	// the flat-hash of the post-state SSZ bytes, for quickly finding different results.
 	PostHash string `json:"post-hash"`
-	// identifies the client software running the transition
+	// the vendor name of the client; 'zrnt', 'lighthouse', etc.
+	ClientVendor string `json:"client-vendor"`
+	// the version number of the client, may contain a git commit hash
 	ClientVersion string `json:"client-version"`
 	// identifies the transition task
 	Key string `json:"key"`
@@ -138,7 +142,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	var task Task
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		taskDoc, err := fsTaskCollection.Doc(result.Key).Get(ctx)
+		taskDoc, err := fsTransitionsCollection.Doc(result.Key).Get(ctx)
 		if status.Code(err) == codes.NotFound || (err == nil && !taskDoc.Exists()) {
 			SERVER_BAD_INPUT.report(w, "task does not exist, cannot process result")
 			return
@@ -151,15 +155,16 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resultDoc := fsResultCollection.NewDoc()
+	// create result in sub-collection of the targeted transition task.
+	resultDoc := fsTransitionsCollection.Doc(result.Key).Collection("results").NewDoc()
 
 	// store task result in firestore
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		resultEntry := &ResultEntry{
-			TaskKey:       result.Key,
 			Success:       result.Success,
 			Created:       time.Now(),
+			ClientVendor:  result.ClientVendor,
 			ClientVersion: result.ClientVersion,
 			PostHash:      result.PostHash,
 		}
