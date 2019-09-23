@@ -87,7 +87,6 @@ type Task struct {
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
 	Created     time.Time `firestore:"created"`
-	Status      string    `firestore:"status"`
 }
 
 type TransitionMsg struct {
@@ -143,6 +142,23 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	blocks := r.MultipartForm.File["blocks"]
 
 	doc := fsTaskCollection.NewDoc()
+	keyStr := doc.ID
+
+	// parse and store header
+	preUpload := r.MultipartForm.File["pre"][0]
+	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
+	if SERVER_ERR.check(w, copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"),
+		"could not store pre-state") {
+		return
+	}
+	// parse and store blocks
+	for i, b := range blocks {
+		log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
+		if SERVER_ERR.check(w, copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
+			fmt.Sprintf("could not store block %d", err)) {
+			return
+		}
+	}
 
 	// store task in firestore
 	{
@@ -151,58 +167,12 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 			Blocks:      len(blocks),
 			SpecVersion: specVersion,
 			Created:     time.Now(),
-			Status:      "started",
 		}
 		_, err := doc.Set(ctx, task)
 
 		if SERVER_ERR.check(w, err, "failed to register task.") {
 			return
 		}
-	}
-
-	keyStr := doc.ID
-	w.WriteHeader(int(SERVER_OK))
-	resp := &UploadResponse{
-		Key: keyStr,
-	}
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
-		log.Printf("failed to encode json response")
-		return
-	}
-
-	// TODO: could return to response faster by putting remainder in go routine
-
-	failedUpload := false
-	// parse and store header
-	preUpload := r.MultipartForm.File["pre"][0]
-	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
-	if err := copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"); err != nil {
-		log.Printf("could not upload pre-state: %v", err)
-		failedUpload = false
-	}
-	if !failedUpload {
-		// parse and store blocks
-		for i, b := range blocks {
-			log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
-			if err := copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)); err != nil {
-				log.Printf(fmt.Sprintf("could not handle uploaded block %d: %v", i, err))
-				failedUpload = true
-				break
-			}
-		}
-	}
-	if failedUpload {
-		// mark firestore entry as failed
-		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		task := &Task{
-			Status: "failed",
-		}
-		_, err := doc.Set(ctx, task, firestore.Merge([]string{"status"}))
-		if err != nil {
-			log.Printf("upload to bucket failed, and then marking the task as 'failed' failed...")
-		}
-		return
 	}
 
 	// fire pubsub event
@@ -222,6 +192,17 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		<-transitionTopic.Publish(ctx, &pubsub.Message{
 			Data: buf.Bytes(),
 		}).Ready()
+	}
+
+	// Success
+	w.WriteHeader(int(SERVER_OK))
+	resp := &UploadResponse{
+		Key: keyStr,
+	}
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(resp); err != nil {
+		log.Printf("failed to encode json response")
+		return
 	}
 }
 
