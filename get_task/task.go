@@ -56,6 +56,10 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		SERVER_BAD_INPUT.Report(w, "No key specified. Set the 'key' URL param.")
 		return
 	}
+	if !KeyRegex.Match([]byte(key)) {
+		SERVER_BAD_INPUT.Report(w, "task key is invalid")
+		return
+	}
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	dat, err := fsTransitionsCollection.Doc(key).Get(ctx)

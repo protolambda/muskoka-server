@@ -95,7 +95,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("spec-version", "==", p[0])
 	}
 	if p, ok := params["client-vendor"]; ok && len(p) > 0 {
-		if !KeyRegex.Match([]byte(p[0])) {
+		if !VendorRegex.Match([]byte(p[0])) {
 			SERVER_BAD_INPUT.Report(w, "client vendor is invalid")
 			return
 		}

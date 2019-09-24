@@ -114,8 +114,12 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		SERVER_BAD_INPUT.Report(w, "client version is invalid")
 		return
 	}
-	if !KeyRegex.Match([]byte(result.ClientVendor)) {
+	if !VendorRegex.Match([]byte(result.ClientVendor)) {
 		SERVER_BAD_INPUT.Report(w, "client vendor is invalid")
+		return
+	}
+	if !KeyRegex.Match([]byte(result.Key)) {
+		SERVER_BAD_INPUT.Report(w, "task key is invalid")
 		return
 	}
 
