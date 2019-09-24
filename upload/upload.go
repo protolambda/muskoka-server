@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	. "github.com/protolambda/muskoka-server/common"
 	"io"
 	"log"
 	"mime/multipart"
@@ -61,32 +62,6 @@ func init() {
 // 10 MB
 const maxUploadMem = 10 * (1 << 20)
 
-type status int
-
-const (
-	SERVER_OK        status = 200
-	SERVER_ERR       status = 500
-	SERVER_BAD_INPUT status = 400
-)
-
-func (s status) report(w http.ResponseWriter, msg string) {
-	w.WriteHeader(int(s))
-	log.Println(msg)
-	_, _ = fmt.Fprintln(w, msg)
-}
-
-func (s status) check(w http.ResponseWriter, err error, msg string) bool {
-	if err != nil {
-		log.Println(msg)
-		log.Println(err)
-		_, _ = fmt.Fprintln(w, msg)
-		w.WriteHeader(int(s))
-		return true
-	} else {
-		return false
-	}
-}
-
 type Task struct {
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
@@ -108,19 +83,19 @@ var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-]")
 func Upload(w http.ResponseWriter, r *http.Request) {
 	specVersion := r.FormValue("spec-version")
 	if specVersion == "" {
-		SERVER_BAD_INPUT.report(w, "spec version is not specified. Set the \"spec-version\" form value.")
+		SERVER_BAD_INPUT.Report(w, "spec version is not specified. Set the \"spec-version\" form value.")
 		return
 	}
 	if len(specVersion) > 10 {
-		SERVER_BAD_INPUT.report(w, "spec version is too long")
+		SERVER_BAD_INPUT.Report(w, "spec version is too long")
 		return
 	}
 	if !versionRegex.Match([]byte(specVersion)) {
-		SERVER_BAD_INPUT.report(w, "spec version is invalid")
+		SERVER_BAD_INPUT.Report(w, "spec version is invalid")
 		return
 	}
 	err := r.ParseMultipartForm(maxUploadMem)
-	if SERVER_BAD_INPUT.check(w, err, "cannot parse multipart upload") {
+	if SERVER_BAD_INPUT.Check(w, err, "cannot parse multipart upload") {
 		return
 	}
 	defer func() {
@@ -130,16 +105,16 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if blocks, ok := r.MultipartForm.File["blocks"]; !ok {
-		SERVER_BAD_INPUT.report(w, "no blocks were specified")
+		SERVER_BAD_INPUT.Report(w, "no blocks were specified")
 		return
 	} else if len(blocks) > 16 {
-		SERVER_BAD_INPUT.report(w, fmt.Sprintf("cannot process high amount of blocks; %v", len(blocks)))
+		SERVER_BAD_INPUT.Report(w, fmt.Sprintf("cannot process high amount of blocks; %v", len(blocks)))
 	}
 	if pre, ok := r.MultipartForm.File["pre"]; !ok {
-		SERVER_BAD_INPUT.report(w, "no pre-state was specified")
+		SERVER_BAD_INPUT.Report(w, "no pre-state was specified")
 		return
 	} else if len(pre) != 1 {
-		SERVER_BAD_INPUT.report(w, "need exactly one pre-state file")
+		SERVER_BAD_INPUT.Report(w, "need exactly one pre-state file")
 		return
 	}
 
@@ -151,14 +126,14 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	// parse and store header
 	preUpload := r.MultipartForm.File["pre"][0]
 	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
-	if SERVER_ERR.check(w, copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"),
+	if SERVER_ERR.Check(w, copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"),
 		"could not store pre-state") {
 		return
 	}
 	// parse and store blocks
 	for i, b := range blocks {
 		log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
-		if SERVER_ERR.check(w, copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
+		if SERVER_ERR.Check(w, copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
 			fmt.Sprintf("could not store block %d", err)) {
 			return
 		}
@@ -174,7 +149,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err := doc.Set(ctx, task)
 
-		if SERVER_ERR.check(w, err, "failed to register task.") {
+		if SERVER_ERR.Check(w, err, "failed to register task.") {
 			return
 		}
 	}

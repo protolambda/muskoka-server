@@ -4,8 +4,11 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	. "github.com/protolambda/muskoka-server/common"
 	gcreds "golang.org/x/oauth2/google"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -58,36 +61,11 @@ func init() {
 	}
 }
 
-type statCode int
-
-const (
-	SERVER_OK        statCode = 200
-	SERVER_ERR       statCode = 500
-	SERVER_BAD_INPUT statCode = 400
-)
-
-func (s statCode) report(w http.ResponseWriter, msg string) {
-	w.WriteHeader(int(s))
-	log.Println(msg)
-	_, _ = fmt.Fprintln(w, msg)
-}
-
-func (s statCode) check(w http.ResponseWriter, err error, msg string) bool {
-	if err != nil {
-		log.Println(msg)
-		log.Println(err)
-		_, _ = fmt.Fprintln(w, msg)
-		w.WriteHeader(int(s))
-		return true
-	} else {
-		return false
-	}
-}
-
 type Task struct {
-	Blocks      int       `firestore:"blocks"`
-	SpecVersion string    `firestore:"spec-version"`
-	Created     time.Time `firestore:"created"`
+	Blocks      int                    `firestore:"blocks"`
+	SpecVersion string                 `firestore:"spec-version"`
+	Created     time.Time              `firestore:"created"`
+	Results     map[string]interface{} `firestore:"results"`
 }
 
 type ResultEntry struct {
@@ -117,24 +95,29 @@ type ResultResponseMsg struct {
 	OutLogURL    string `json:"out-log"`
 }
 
-var rootRegex, _ = regexp.Compile("0x[0-9a-f]{64}")
+var rootRegex, _ = regexp.Compile("^0x[0-9a-f]{64}$")
+var keyRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_.0-9a-zA-Z]{0,128}$")
 
 func Results(w http.ResponseWriter, r *http.Request) {
 	// TODO check client auth
 
 	dec := json.NewDecoder(r.Body)
 	var result ResultMsg
-	if SERVER_BAD_INPUT.check(w, dec.Decode(&result), "could not decode result input") {
+	if SERVER_BAD_INPUT.Check(w, dec.Decode(&result), "could not decode result input") {
 		return
 	}
 
 	if !rootRegex.Match([]byte(result.PostHash)) {
-		SERVER_BAD_INPUT.report(w, "post hash has invalid format")
+		SERVER_BAD_INPUT.Report(w, "post hash has invalid format")
 		return
 	}
 
-	if len(result.ClientVersion) > 255 {
-		SERVER_BAD_INPUT.report(w, "client version is too long")
+	if !keyRegex.Match([]byte(result.ClientVersion)) {
+		SERVER_BAD_INPUT.Report(w, "client version is invalid")
+		return
+	}
+	if !keyRegex.Match([]byte(result.ClientVendor)) {
+		SERVER_BAD_INPUT.Report(w, "client vendor is invalid")
 		return
 	}
 
@@ -144,33 +127,33 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		taskDoc, err := fsTransitionsCollection.Doc(result.Key).Get(ctx)
 		if status.Code(err) == codes.NotFound || (err == nil && !taskDoc.Exists()) {
-			SERVER_BAD_INPUT.report(w, "task does not exist, cannot process result")
+			SERVER_BAD_INPUT.Report(w, "task does not exist, cannot process result")
 			return
 		}
-		if SERVER_ERR.check(w, err, "failed to lookup task") {
+		if SERVER_ERR.Check(w, err, "failed to lookup task") {
 			return
 		}
-		if SERVER_ERR.check(w, taskDoc.DataTo(&task), "failed to parse task") {
+		if SERVER_ERR.Check(w, taskDoc.DataTo(&task), "failed to parse task") {
 			return
 		}
 	}
 
-	// create result in sub-collection of the targeted transition task.
-	resultDoc := fsTransitionsCollection.Doc(result.Key).Collection("results").NewDoc()
-
-	// store task result in firestore
+	keyStr := uniqueID()
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		resultEntry := &ResultEntry{
-			Success:       result.Success,
-			Created:       time.Now(),
-			ClientVendor:  result.ClientVendor,
-			ClientVersion: result.ClientVersion,
-			PostHash:      result.PostHash,
-		}
-		_, err := resultDoc.Set(ctx, resultEntry)
+		_, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, map[string]interface{}{
+			"results": map[string]interface{}{
+				keyStr: ResultEntry{
+					Success:       result.Success,
+					Created:       time.Now(),
+					ClientVendor:  result.ClientVendor,
+					ClientVersion: result.ClientVersion,
+					PostHash:      result.PostHash,
+				},
+			},
+		}, firestore.MergeAll)
 
-		if SERVER_ERR.check(w, err, "failed to register result.") {
+		if SERVER_ERR.Check(w, err, "failed to register result.") {
 			return
 		}
 	}
@@ -179,26 +162,33 @@ func Results(w http.ResponseWriter, r *http.Request) {
 
 	// create signed urls to upload results to
 	{
-		path := fmt.Sprintf("%s/%s/results/%s/%s", task.SpecVersion, result.Key, result.ClientVersion, resultDoc.ID)
+		path := fmt.Sprintf("%s/%s/results/%s/%s/%s", task.SpecVersion, result.Key, result.ClientVendor, result.ClientVersion, keyStr)
 		var err error
 		respMsg.PostStateURL, err = createSignedStoragePutUrl(path + "/post.ssz")
-		if SERVER_ERR.check(w, err, "could not create signed post state url") {
+		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
 			return
 		}
 		respMsg.ErrLogURL, err = createSignedStoragePutUrl(path + "/err_log.txt")
-		if SERVER_ERR.check(w, err, "could not create signed post state url") {
+		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
 			return
 		}
 		respMsg.OutLogURL, err = createSignedStoragePutUrl(path + "/out_log.txt")
-		if SERVER_ERR.check(w, err, "could not create signed post state url") {
+		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
 			return
 		}
 	}
 
-	keyStr := resultDoc.ID
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(respMsg); err != nil {
 		log.Printf("could not encode response for task %s, result %s: %v", result.Key, keyStr, err)
 	}
+}
+
+func uniqueID() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand.Read error: %v", err))
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
