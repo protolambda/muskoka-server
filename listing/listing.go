@@ -33,21 +33,23 @@ func init() {
 }
 
 type Task struct {
-	Blocks      int                    `firestore:"blocks"`
-	SpecVersion string                 `firestore:"spec-version"`
-	Created     time.Time              `firestore:"created"`
-	Results     map[string]ResultEntry `firestore:"results"`
+	Blocks      int                    `firestore:"blocks",json:"blocks"`
+	SpecVersion string                 `firestore:"spec-version",json:"spec-version"`
+	Created     time.Time              `firestore:"created",json:"created"`
+	Results     map[string]ResultEntry `firestore:"results",json:"results"`
+	// ignored by firestore. But used to uniquely identify the task, and fetch its contents from storage.
+	Key string `firestore:"-",json:"key"`
 	// Ignored for listing purposes
 	//WorkersVersioned map[string]string      `firestore:"workers-versioned"`
 	//Workers          map[string]bool        `firestore:"workers"`
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success"`
-	Created       time.Time `firestore:"created"`
-	ClientVendor  string    `firestore:"client-vendor"`
-	ClientVersion string    `firestore:"client-version"`
-	PostHash      string    `firestore:"post-hash"`
+	Success       bool      `firestore:"success",json:"success"`
+	Created       time.Time `firestore:"created",json:"created"`
+	ClientVendor  string    `firestore:"client-vendor",json:"client-vendor"`
+	ClientVersion string    `firestore:"client-version",json:"client-version"`
+	PostHash      string    `firestore:"post-hash",json:"post-hash"`
 }
 
 func Listing(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +130,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 		if SERVER_ERR.Check(w, doc.DataTo(&outputList[i]), "could not parse result: "+doc.Ref.ID) {
 			return
 		}
+		outputList[i].Key = doc.Ref.ID
 	}
 	w.Header().Set("Content-Type", "application/json")
 
