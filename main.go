@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/gorilla/mux"
+	"github.com/protolambda/muskoka-server/get_task"
 	"github.com/protolambda/muskoka-server/listing"
 	"github.com/protolambda/muskoka-server/results"
 	"github.com/protolambda/muskoka-server/upload"
@@ -21,6 +22,7 @@ func main() {
 	r.HandleFunc("/upload", upload.Upload)
 	r.HandleFunc("/results", results.Results)
 	r.HandleFunc("/listing", listing.Listing)
+	r.HandleFunc("/task", get_task.GetTask)
 	r.Handle("/", fs)
 	// Add routes as needed
 
