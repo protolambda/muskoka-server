@@ -15,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"time"
 )
 
@@ -62,10 +61,12 @@ func init() {
 }
 
 type Task struct {
-	Blocks      int                    `firestore:"blocks"`
-	SpecVersion string                 `firestore:"spec-version"`
-	Created     time.Time              `firestore:"created"`
-	Results     map[string]interface{} `firestore:"results"`
+	Blocks           int                    `firestore:"blocks"`
+	SpecVersion      string                 `firestore:"spec-version"`
+	Created          time.Time              `firestore:"created"`
+	Results          map[string]ResultEntry `firestore:"results"`
+	WorkersVersioned map[string]string      `firestore:"workers-versioned"`
+	Workers          map[string]bool        `firestore:"workers"`
 }
 
 type ResultEntry struct {
@@ -95,9 +96,6 @@ type ResultResponseMsg struct {
 	OutLogURL    string `json:"out-log"`
 }
 
-var rootRegex, _ = regexp.Compile("^0x[0-9a-f]{64}$")
-var keyRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_.0-9a-zA-Z]{0,128}$")
-
 func Results(w http.ResponseWriter, r *http.Request) {
 	// TODO check client auth
 
@@ -107,16 +105,16 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rootRegex.Match([]byte(result.PostHash)) {
+	if !RootRegex.Match([]byte(result.PostHash)) {
 		SERVER_BAD_INPUT.Report(w, "post hash has invalid format")
 		return
 	}
 
-	if !keyRegex.Match([]byte(result.ClientVersion)) {
+	if !VersionRegex.Match([]byte(result.ClientVersion)) {
 		SERVER_BAD_INPUT.Report(w, "client version is invalid")
 		return
 	}
-	if !keyRegex.Match([]byte(result.ClientVendor)) {
+	if !KeyRegex.Match([]byte(result.ClientVendor)) {
 		SERVER_BAD_INPUT.Report(w, "client vendor is invalid")
 		return
 	}
@@ -142,14 +140,20 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		_, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, map[string]interface{}{
-			"results": map[string]interface{}{
-				keyStr: ResultEntry{
+			"results": map[string]ResultEntry{
+				keyStr: {
 					Success:       result.Success,
 					Created:       time.Now(),
 					ClientVendor:  result.ClientVendor,
 					ClientVersion: result.ClientVersion,
 					PostHash:      result.PostHash,
 				},
+			},
+			"workers-versioned": map[string]string{
+				result.ClientVendor: result.ClientVersion,
+			},
+			"workers": map[string]bool{
+				result.ClientVendor: true,
 			},
 		}, firestore.MergeAll)
 
@@ -177,7 +181,8 @@ func Results(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(respMsg); err != nil {

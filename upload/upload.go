@@ -66,6 +66,7 @@ type Task struct {
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
 	Created     time.Time `firestore:"created"`
+	// Results and workers are ignored, only added later when workers make results available
 }
 
 type TransitionMsg struct {
