@@ -72,7 +72,7 @@ type Task struct {
 type ResultEntry struct {
 	Success       bool      `firestore:"success"`
 	Created       time.Time `firestore:"created"`
-	ClientVendor  string    `firestore:"client-vendor"`
+	ClientName    string    `firestore:"client-name"`
 	ClientVersion string    `firestore:"client-version"`
 	PostHash      string    `firestore:"post-hash"`
 }
@@ -82,8 +82,8 @@ type ResultMsg struct {
 	Success bool `json:"success"`
 	// the flat-hash of the post-state SSZ bytes, for quickly finding different results.
 	PostHash string `json:"post-hash"`
-	// the vendor name of the client; 'zrnt', 'lighthouse', etc.
-	ClientVendor string `json:"client-vendor"`
+	// the client-name name of the client; 'zrnt', 'lighthouse', etc.
+	ClientName string `json:"client-name"`
 	// the version number of the client, may contain a git commit hash
 	ClientVersion string `json:"client-version"`
 	// identifies the transition task
@@ -114,8 +114,8 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		SERVER_BAD_INPUT.Report(w, "client version is invalid")
 		return
 	}
-	if !VendorRegex.Match([]byte(result.ClientVendor)) {
-		SERVER_BAD_INPUT.Report(w, "client vendor is invalid")
+	if !ClientNameRegex.Match([]byte(result.ClientName)) {
+		SERVER_BAD_INPUT.Report(w, "client name is invalid")
 		return
 	}
 	if !KeyRegex.Match([]byte(result.Key)) {
@@ -148,16 +148,16 @@ func Results(w http.ResponseWriter, r *http.Request) {
 				keyStr: {
 					Success:       result.Success,
 					Created:       time.Now(),
-					ClientVendor:  result.ClientVendor,
+					ClientName:    result.ClientName,
 					ClientVersion: result.ClientVersion,
 					PostHash:      result.PostHash,
 				},
 			},
 			"workers-versioned": map[string]string{
-				result.ClientVendor: result.ClientVersion,
+				result.ClientName: result.ClientVersion,
 			},
 			"workers": map[string]bool{
-				result.ClientVendor: true,
+				result.ClientName: true,
 			},
 		}, firestore.MergeAll)
 
@@ -170,7 +170,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 
 	// create signed urls to upload results to
 	{
-		path := fmt.Sprintf("%s/%s/results/%s/%s/%s", task.SpecVersion, result.Key, result.ClientVendor, result.ClientVersion, keyStr)
+		path := fmt.Sprintf("%s/%s/results/%s/%s/%s", task.SpecVersion, result.Key, result.ClientName, result.ClientVersion, keyStr)
 		var err error
 		respMsg.PostStateURL, err = createSignedStoragePutUrl(path + "/post.ssz")
 		if SERVER_ERR.Check(w, err, "could not create signed post state url") {

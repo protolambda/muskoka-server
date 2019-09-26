@@ -16,7 +16,7 @@ API for getting a single task.
     <unique result key>: {
        "success": bool,
        "created": time,
-       "client-vendor": string,
+       "client-name": string,
        "client-version": string,
        "post-hash": string
     },
@@ -28,6 +28,6 @@ API for getting a single task.
 Storage result link formats:
 
 - inputs: `<spec-version>/<key>/{pre.ssz, block_%d.ssz}`
-- results: `<spec-version>/<key>/results/<client-vendor>/<client-version>/<result-key>/{post.ssz, out_log.txt, err_log.txt}`
+- results: `<spec-version>/<key>/results/<client-name>/<client-version>/<result-key>/{post.ssz, out_log.txt, err_log.txt}`
 
 Queried on the storage API endpoint: `https://storage.googleapis.com`

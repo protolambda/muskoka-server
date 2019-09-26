@@ -8,8 +8,8 @@ var RootRegex, _ = regexp.Compile("^0x[0-9a-f]{64}$")
 // make sure keys don't start with `__`, or underscores at all
 var KeyRegex, _ = regexp.Compile("^[-0-9a-zA-Z=][-_0-9a-zA-Z=]{0,128}$")
 
-// make sure vendor keys don't start with `__`, or underscores at all, or hyphens
-var VendorRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_0-9a-zA-Z]{0,128}$")
+// make sure client name keys don't start with `__`, or underscores at all, or hyphens
+var ClientNameRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_0-9a-zA-Z]{0,128}$")
 
 // versions are not used as keys in firestore, and may contain dots.
 var VersionRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_.0-9a-zA-Z]{0,128}$")

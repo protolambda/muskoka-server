@@ -42,7 +42,7 @@ type Task struct {
 type ResultEntry struct {
 	Success       bool      `firestore:"success",json:"success"`
 	Created       time.Time `firestore:"created",json:"created"`
-	ClientVendor  string    `firestore:"client-vendor",json:"client-vendor"`
+	ClientName    string    `firestore:"client-name",json:"client-name"`
 	ClientVersion string    `firestore:"client-version",json:"client-version"`
 	PostHash      string    `firestore:"post-hash",json:"post-hash"`
 }
