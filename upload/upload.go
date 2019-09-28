@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -121,6 +123,26 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 
 	blocks := r.MultipartForm.File["blocks"]
 
+	if indicesStr := r.FormValue("blocks-order"); indicesStr != "" {
+		blockIndices := strings.Split(indicesStr, ",")
+		if len(blockIndices) != len(blocks) {
+			SERVER_BAD_INPUT.Report(w, "specified blocks order has mismatching index count compared to actual blocks uploaded")
+			return
+		}
+		blocksReordered := make([]*multipart.FileHeader, len(blockIndices), len(blockIndices))
+		for dstIndex := 0; dstIndex < len(blockIndices); dstIndex++ {
+			srcIndex, err := strconv.ParseUint(blockIndices[dstIndex], 10, 64)
+			if err != nil || srcIndex >= uint64(len(blockIndices)) || blocks[srcIndex] == nil {
+				SERVER_BAD_INPUT.Report(w, "specified block indices are not valid unique within-range indices")
+				return
+			}
+			blocksReordered[dstIndex] = blocks[srcIndex]
+			// don't re-use blocks. All must be unique.
+			blocks[srcIndex] = nil
+		}
+		blocks = blocksReordered
+	}
+
 	doc := fsTransitionsCollection.NewDoc()
 	keyStr := doc.ID
 
@@ -174,16 +196,8 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		}).Ready()
 	}
 
-	// Success
-	w.WriteHeader(int(SERVER_OK))
-	resp := &UploadResponse{
-		Key: keyStr,
-	}
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
-		log.Printf("failed to encode json response")
-		return
-	}
+	// Success, redirect to result
+	http.Redirect(w, r, "/task/"+keyStr, http.StatusSeeOther)
 }
 
 func copyUploadToBucket(u *multipart.FileHeader, key string) error {
