@@ -132,11 +132,11 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pubSubTopic := pubSubClient.Topic(fmt.Sprintf("transition/%s/%s", specVersion, specConfig))
+	pubSubTopic := pubSubClient.Topic(fmt.Sprintf("transition~%s~%s", specVersion, specConfig))
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		if ok, err := pubSubTopic.Exists(ctx); err != nil {
-			SERVER_ERR.Report(w, "could not check if spec version + config is a valid topic")
+		ok, err := pubSubTopic.Exists(ctx)
+		if SERVER_ERR.Check(w, err, "could not check if spec version + config is a valid topic") {
 			return
 		} else if !ok {
 			SERVER_BAD_INPUT.Report(w, "Cannot recognize provided spec version + config")
@@ -153,15 +153,16 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		blocksReordered := make([]*multipart.FileHeader, len(blockIndices), len(blockIndices))
+		blocksTaken := make([]bool, len(blockIndices), len(blockIndices))
 		for dstIndex := 0; dstIndex < len(blockIndices); dstIndex++ {
 			srcIndex, err := strconv.ParseUint(blockIndices[dstIndex], 10, 64)
-			if err != nil || srcIndex >= uint64(len(blockIndices)) || blocks[srcIndex] == nil {
+			if err != nil || srcIndex >= uint64(len(blockIndices)) || blocksTaken[srcIndex] {
 				SERVER_BAD_INPUT.Report(w, "specified block indices are not valid unique within-range indices")
 				return
 			}
 			blocksReordered[dstIndex] = blocks[srcIndex]
 			// don't re-use blocks. All must be unique.
-			blocks[srcIndex] = nil
+			blocksTaken[srcIndex] = true
 		}
 		blocks = blocksReordered
 	}

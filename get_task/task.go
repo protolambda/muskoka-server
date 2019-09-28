@@ -31,22 +31,23 @@ func init() {
 }
 
 type Task struct {
-	Blocks      int                    `firestore:"blocks",json:"blocks"`
-	SpecVersion string                 `firestore:"spec-version",json:"spec-version"`
-	SpecConfig  string                 `firestore:"spec-config",json:"spec-config"`
-	Created     time.Time              `firestore:"created",json:"created"`
-	Results     map[string]ResultEntry `firestore:"results",json:"results"`
+	Blocks      int                    `firestore:"blocks" json:"blocks"`
+	SpecVersion string                 `firestore:"spec-version" json:"spec-version"`
+	SpecConfig  string                 `firestore:"spec-config" json:"spec-config"`
+	Created     time.Time              `firestore:"created" json:"created"`
+	Results     map[string]ResultEntry `firestore:"results" json:"results"`
 	// Ignored for listing purposes
 	//WorkersVersioned map[string]string      `firestore:"workers-versioned"`
 	//Workers          map[string]bool        `firestore:"workers"`
+	//HasFail     bool                        `firestore:"has-fail"`
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success",json:"success"`
-	Created       time.Time `firestore:"created",json:"created"`
-	ClientName    string    `firestore:"client-name",json:"client-name"`
-	ClientVersion string    `firestore:"client-version",json:"client-version"`
-	PostHash      string    `firestore:"post-hash",json:"post-hash"`
+	Success       bool      `firestore:"success" json:"success"`
+	Created       time.Time `firestore:"created" json:"created"`
+	ClientName    string    `firestore:"client-name" json:"client-name"`
+	ClientVersion string    `firestore:"client-version" json:"client-version"`
+	PostHash      string    `firestore:"post-hash" json:"post-hash"`
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {

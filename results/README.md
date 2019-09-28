@@ -10,5 +10,6 @@ Cloud func that:
       - Worker is registered to have produced a result, by merging in the following keys into the task:
           - `<taks key>.workers.<worker client name>` is set to `true`.
           - `<task key>.workers-versioned.<worker client name>` is set to `<worker client version>`
+          - `<task key>.has-fail` is set to `true` if the result was not a success
   - responds with a signed storage PUT url for `muskoka-transitions` bucket entry `<spec-version>/<key>/results/<client-name>/<client-version>/<result-key>/{post.ssz, out_log.txt, err_log.txt}` to upload result to.
 

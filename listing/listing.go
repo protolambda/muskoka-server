@@ -33,24 +33,24 @@ func init() {
 }
 
 type Task struct {
-	Blocks      int                    `firestore:"blocks",json:"blocks"`
-	SpecVersion string                 `firestore:"spec-version",json:"spec-version"`
-	SpecConfig  string                 `firestore:"spec-config",json:"spec-config"`
-	Created     time.Time              `firestore:"created",json:"created"`
-	Results     map[string]ResultEntry `firestore:"results",json:"results"`
+	Blocks      int                    `firestore:"blocks" json:"blocks"`
+	SpecVersion string                 `firestore:"spec-version" json:"spec-version"`
+	SpecConfig  string                 `firestore:"spec-config" json:"spec-config"`
+	Created     time.Time              `firestore:"created" json:"created"`
+	Results     map[string]ResultEntry `firestore:"results" json:"results"`
 	// ignored by firestore. But used to uniquely identify the task, and fetch its contents from storage.
-	Key string `firestore:"-",json:"key"`
+	Key string `firestore:"-" json:"key"`
 	// Ignored for listing purposes
 	//WorkersVersioned map[string]string      `firestore:"workers-versioned"`
 	//Workers          map[string]bool        `firestore:"workers"`
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success",json:"success"`
-	Created       time.Time `firestore:"created",json:"created"`
-	ClientName    string    `firestore:"client-name",json:"client-name"`
-	ClientVersion string    `firestore:"client-version",json:"client-version"`
-	PostHash      string    `firestore:"post-hash",json:"post-hash"`
+	Success       bool      `firestore:"success" json:"success"`
+	Created       time.Time `firestore:"created" json:"created"`
+	ClientName    string    `firestore:"client-name" json:"client-name"`
+	ClientVersion string    `firestore:"client-version" json:"client-version"`
+	PostHash      string    `firestore:"post-hash" json:"post-hash"`
 }
 
 // TODO: implement new client-name @ version query option
@@ -93,6 +93,9 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 		// default to latest-first
 		q.OrderBy("created", firestore.Desc)
 	}
+	if p, ok := params["has-fail"]; ok && len(p) > 0 && p[0] == "true" {
+		q = q.Where("has-fail", "==", true)
+	}
 	if p, ok := params["spec-version"]; ok && len(p) > 0 {
 		q = q.Where("spec-version", "==", p[0])
 	}
@@ -117,7 +120,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// do not select "workers" or "workers-versioned" helper fields.
-	q = q.Select("blocks", "spec-version", "created", "results")
+	q = q.Select("blocks", "spec-version", "spec-config", "created", "results")
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	docsIter := q.Documents(ctx)
@@ -132,6 +135,8 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 		}
 		i := len(outputList)
 		outputList = append(outputList, Task{})
+		d := doc.Data()
+		log.Printf("data: %v\n", d)
 		if SERVER_ERR.Check(w, doc.DataTo(&outputList[i]), "could not parse result: "+doc.Ref.ID) {
 			return
 		}

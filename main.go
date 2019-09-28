@@ -19,6 +19,7 @@ func main() {
 
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
+	r.Use(corsMiddleware)
 	r.HandleFunc("/upload", upload.Upload)
 	r.HandleFunc("/results", results.Results)
 	r.HandleFunc("/listing", listing.Listing)
@@ -52,6 +53,16 @@ func main() {
 	srv.Shutdown(ctx)
 	log.Println("shutting down")
 	os.Exit(0)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Length,Content-Range")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

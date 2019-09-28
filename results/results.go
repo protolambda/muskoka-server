@@ -68,6 +68,7 @@ type Task struct {
 	Results          map[string]ResultEntry `firestore:"results"`
 	WorkersVersioned map[string]string      `firestore:"workers-versioned"`
 	Workers          map[string]bool        `firestore:"workers"`
+	HasFail          bool                   `firestore:"has-fail"`
 }
 
 type ResultEntry struct {
@@ -144,7 +145,7 @@ func Results(w http.ResponseWriter, r *http.Request) {
 	keyStr := uniqueID()
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		_, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, map[string]interface{}{
+		mergeData := map[string]interface{}{
 			"results": map[string]ResultEntry{
 				keyStr: {
 					Success:       result.Success,
@@ -160,7 +161,11 @@ func Results(w http.ResponseWriter, r *http.Request) {
 			"workers": map[string]bool{
 				result.ClientName: true,
 			},
-		}, firestore.MergeAll)
+		}
+		if !result.Success {
+			mergeData["has-fail"] = true
+		}
+		_, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, mergeData, firestore.MergeAll)
 
 		if SERVER_ERR.Check(w, err, "failed to register result.") {
 			return
