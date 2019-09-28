@@ -4,6 +4,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"context"
 	"encoding/json"
+	"github.com/gorilla/mux"
 	. "github.com/protolambda/muskoka-server/common"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,10 +49,15 @@ type ResultEntry struct {
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
+	mVars := mux.Vars(r)
 	params := r.URL.Query()
 	var key string
-	if p, ok := params["key"]; ok && len(p) > 0 {
+	p, okP := params["key"]
+	m, okM := mVars["key"]
+	if okP && len(p) > 0 {
 		key = p[0]
+	} else if okM {
+		key = m
 	} else {
 		SERVER_BAD_INPUT.Report(w, "No key specified. Set the 'key' URL param.")
 		return

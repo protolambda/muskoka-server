@@ -23,6 +23,7 @@ func main() {
 	r.HandleFunc("/results", results.Results)
 	r.HandleFunc("/listing", listing.Listing)
 	r.HandleFunc("/task", get_task.GetTask)
+	r.HandleFunc("/task/{key}", get_task.GetTask)
 	r.Handle("/", fs)
 	// Add routes as needed
 
