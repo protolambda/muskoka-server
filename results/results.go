@@ -63,6 +63,7 @@ func init() {
 type Task struct {
 	Blocks           int                    `firestore:"blocks"`
 	SpecVersion      string                 `firestore:"spec-version"`
+	SpecConfig       string                 `firestore:"spec-config"`
 	Created          time.Time              `firestore:"created"`
 	Results          map[string]ResultEntry `firestore:"results"`
 	WorkersVersioned map[string]string      `firestore:"workers-versioned"`

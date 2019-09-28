@@ -21,7 +21,7 @@ import (
 )
 
 var inputsBucket *storage.BucketHandle
-var transitionTopic *pubsub.Topic
+var pubSubClient *pubsub.Client
 var fsTransitionsCollection *firestore.CollectionRef
 
 func init() {
@@ -39,11 +39,11 @@ func init() {
 
 	// pubsub
 	{
-		pubsubClient, err := pubsub.NewClient(ctx, projectID)
+		cl, err := pubsub.NewClient(ctx, projectID)
 		if err != nil {
 			log.Fatalf("Failed to create pubsub client: %v", err)
 		}
-		transitionTopic = pubsubClient.Topic("transition")
+		pubSubClient = cl
 	}
 
 	// storage
@@ -67,6 +67,7 @@ const maxUploadMem = 10 * (1 << 20)
 type Task struct {
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
+	SpecConfig  string    `firestore:"spec-config"`
 	Created     time.Time `firestore:"created"`
 	// Results and workers are ignored, only added later when workers make results available
 }
@@ -74,6 +75,7 @@ type Task struct {
 type TransitionMsg struct {
 	Blocks      int    `json:"blocks"`
 	SpecVersion string `json:"spec-version"`
+	SpecConfig  string `json:"spec-config"`
 	Key         string `json:"key"`
 }
 
@@ -91,6 +93,15 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(specVersion) > 10 {
 		SERVER_BAD_INPUT.Report(w, "spec version is too long")
+		return
+	}
+	specConfig := r.FormValue("spec-config")
+	if specConfig == "" {
+		SERVER_BAD_INPUT.Report(w, "spec config is not specified. Set the \"spec-config\" form value.")
+		return
+	}
+	if len(specConfig) > 100 {
+		SERVER_BAD_INPUT.Report(w, "spec config name is too long")
 		return
 	}
 	if !versionRegex.Match([]byte(specVersion)) {
@@ -119,6 +130,18 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	} else if len(pre) != 1 {
 		SERVER_BAD_INPUT.Report(w, "need exactly one pre-state file")
 		return
+	}
+
+	pubSubTopic := pubSubClient.Topic(fmt.Sprintf("transition/%s/%s", specVersion, specConfig))
+	{
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		if ok, err := pubSubTopic.Exists(ctx); err != nil {
+			SERVER_ERR.Report(w, "could not check if spec version + config is a valid topic")
+			return
+		} else if !ok {
+			SERVER_BAD_INPUT.Report(w, "Cannot recognize provided spec version + config")
+			return
+		}
 	}
 
 	blocks := r.MultipartForm.File["blocks"]
@@ -168,6 +191,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		task := &Task{
 			Blocks:      len(blocks),
 			SpecVersion: specVersion,
+			SpecConfig:  specConfig,
 			Created:     time.Now(),
 		}
 		_, err := doc.Set(ctx, task)
@@ -182,6 +206,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		trMsg := &TransitionMsg{
 			Blocks:      len(blocks),
 			SpecVersion: specVersion,
+			SpecConfig:  specConfig,
 			Key:         keyStr,
 		}
 		var buf bytes.Buffer
@@ -191,7 +216,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		<-transitionTopic.Publish(ctx, &pubsub.Message{
+		<-pubSubTopic.Publish(ctx, &pubsub.Message{
 			Data: buf.Bytes(),
 		}).Ready()
 	}

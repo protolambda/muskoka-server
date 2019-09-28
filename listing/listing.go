@@ -35,6 +35,7 @@ func init() {
 type Task struct {
 	Blocks      int                    `firestore:"blocks",json:"blocks"`
 	SpecVersion string                 `firestore:"spec-version",json:"spec-version"`
+	SpecConfig  string                 `firestore:"spec-config",json:"spec-config"`
 	Created     time.Time              `firestore:"created",json:"created"`
 	Results     map[string]ResultEntry `firestore:"results",json:"results"`
 	// ignored by firestore. But used to uniquely identify the task, and fetch its contents from storage.
@@ -95,6 +96,9 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	if p, ok := params["spec-version"]; ok && len(p) > 0 {
 		q = q.Where("spec-version", "==", p[0])
 	}
+	if p, ok := params["spec-config"]; ok && len(p) > 0 {
+		q = q.Where("spec-config", "==", p[0])
+	}
 	if p, ok := params["client-name"]; ok && len(p) > 0 {
 		if !ClientNameRegex.Match([]byte(p[0])) {
 			SERVER_BAD_INPUT.Report(w, "client name is invalid")
@@ -142,16 +146,16 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	// if newer than 30 seconds -> no cache
 	// otherwise -> cache for 30 seconds
 	if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour*24*7).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour*24*7).Before(time.Now()) {
+		outputList[0].Created.Add(time.Hour * 24 * 7).Before(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Hour * 24 * 7).Before(time.Now()) {
 		w.Header().Set("Cache-Control", "max-age=86400") // 1 day
 	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour*3).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour*3).Before(time.Now()) {
+		outputList[0].Created.Add(time.Hour * 3).Before(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Hour * 3).Before(time.Now()) {
 		w.Header().Set("Cache-Control", "max-age=3600") // 1 hour
 	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Second*30).After(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Second*30).After(time.Now()) {
+		outputList[0].Created.Add(time.Second * 30).After(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Second * 30).After(time.Now()) {
 		w.Header().Set("Cache-Control", "no-cache") // no cache
 	} else {
 		w.Header().Set("Cache-Control", "max-age=30") // half a minute

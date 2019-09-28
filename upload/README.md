@@ -11,5 +11,5 @@ Cloud func that:
       Client-side can't modify `blocks` order because of security restrictions in the browser.
  - creates a firestore entry with unique ID, in collection `transitions`
  - uploads input data to `muskoka-transitions` bucket (`<spec-version>/<key>/{pre.ssz, block_%d.ssz}`)
- - emits JSON event to pus-sub with `spec-version:string`, `key:string`, `blocks:int`
+ - emits JSON event to pus-sub (topic: `transition/<spec-version>/<spec-config>`) with `spec-version:string`, `spec-config:string`, `key:string`, `blocks:int`
  
