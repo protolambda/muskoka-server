@@ -1,7 +1,9 @@
 package main
 
 import (
+	"cloud.google.com/go/pubsub"
 	"context"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/protolambda/muskoka-server/get_task"
 	"github.com/protolambda/muskoka-server/listing"
@@ -14,14 +16,41 @@ import (
 	"time"
 )
 
+var pubsubClient *pubsub.Client
+
 func main() {
+	// Setup pubsub client
+	{
+		cl, err := pubsub.NewClient(context.Background(), os.Getenv("GCP_PROJECT"))
+		if err != nil {
+			log.Fatalf("Failed to create pubsub client: %v", err)
+		}
+		pubsubClient = cl
+	}
+
+	clients := []string{
+		"zrnt",
+	}
+	// this is not an authenticated cloud func, but a dev environment. Just accept any client we are listening for.
+	results.CheckClient = func(name string) bool {
+		for _, c := range clients {
+			if c == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, c := range clients {
+		startPubsubListener(fmt.Sprintf("results~%s", c), results.Results)
+	}
+
 	fs := http.FileServer(http.Dir("static"))
 
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Use(corsMiddleware)
 	r.HandleFunc("/upload", upload.Upload)
-	r.HandleFunc("/results", results.Results)
 	r.HandleFunc("/listing", listing.Listing)
 	r.HandleFunc("/task", get_task.GetTask)
 	r.HandleFunc("/task/{key}", get_task.GetTask)
@@ -70,4 +99,35 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		log.Println(r.RequestURI)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func startPubsubListener(subId string, pubsubHandler func(ctx context.Context, m *pubsub.Message) error) {
+	sub := pubsubClient.Subscription(subId)
+	// check if the subscription exists
+	{
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*15)
+		if exists, err := sub.Exists(ctx); err != nil {
+			log.Fatalf("could not check if pubsub subscription exists: %v\n", err)
+		} else if !exists {
+			log.Fatalf("subscription %s does not exist. Either the worker was misconfigured (try --sub-id) or a new subscription needs to be created and permissioned.", subId)
+		}
+	}
+	// configure pubsub receiver
+	sub.ReceiveSettings = pubsub.ReceiveSettings{
+		MaxExtension:           -1,
+		MaxOutstandingMessages: 20,
+		MaxOutstandingBytes:    1 << 10,
+		NumGoroutines:          4,
+		Synchronous:            true,
+	}
+	// try receiving messages
+	{
+		if err := sub.Receive(context.Background(), func(ctx context.Context, message *pubsub.Message) {
+			if err := pubsubHandler(ctx, message); err != nil {
+				log.Printf("failed pubsub function call: %v", err)
+			}
+		}); err != nil {
+			log.Fatalf("could not receive pubsub messages: %v", err)
+		}
+	}
 }

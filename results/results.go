@@ -1,25 +1,32 @@
 package results
 
 import (
+	"bytes"
 	"cloud.google.com/go/firestore"
-	"cloud.google.com/go/storage"
+	"cloud.google.com/go/pubsub"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	. "github.com/protolambda/muskoka-server/common"
-	gcreds "golang.org/x/oauth2/google"
+	//"google.golang.org/api/iam/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"log"
-	"net/http"
 	"os"
 	"time"
 )
 
+const storageAPI = "https://storage.googleapis.com"
+
+// default: every client is denied.
+var CheckClient = func(name string) bool {
+	return false
+}
+
 var fsTransitionsCollection *firestore.CollectionRef
-var createSignedStoragePutUrl func(name string) (string, error)
 
 func init() {
 	projectID := os.Getenv("GCP_PROJECT")
@@ -35,28 +42,12 @@ func init() {
 	}
 
 	{
-		defaultCreds, err := gcreds.FindDefaultCredentials(ctx, storage.ScopeFullControl)
-		if err != nil {
-			log.Fatalf("failed to load default credentials with full storage scope")
+		if envName := os.Getenv("ETH2_CLIENT_NAME"); envName != "" {
+			// default: every client is denied.
+			CheckClient = func(name string) bool {
+				return name == envName
+			}
 		}
-		conf, err := gcreds.JWTConfigFromJSON(defaultCreds.JSON, storage.ScopeFullControl)
-		if err != nil {
-			log.Fatalf("failed to parse default credentials: %v", err)
-		}
-		bucketName := "muskoka-transitions"
-		if envName := os.Getenv("TRANSITIONS_BUCKET"); envName != "" {
-			bucketName = envName
-		}
-		createSignedStoragePutUrl = func(name string) (string, error) {
-			return storage.SignedURL(bucketName, name, &storage.SignedURLOptions{
-				Scheme:         storage.SigningSchemeV4,
-				Method:         "PUT",
-				GoogleAccessID: conf.Email,
-				PrivateKey:     conf.PrivateKey,
-				Expires:        time.Now().Add(15 * time.Minute),
-			})
-		}
-
 	}
 }
 
@@ -77,6 +68,13 @@ type ResultEntry struct {
 	ClientName    string    `firestore:"client-name"`
 	ClientVersion string    `firestore:"client-version"`
 	PostHash      string    `firestore:"post-hash"`
+	Files         ResultFilesRef `firestore:"files"`
+}
+
+type ResultFilesRef struct {
+	PostStateURL string `firestore:"post-state-url"`
+	ErrLogURL    string `firestore:"err-log-url"`
+	OutLogURL    string `firestore:"out-log-url"`
 }
 
 type ResultMsg struct {
@@ -84,67 +82,72 @@ type ResultMsg struct {
 	Success bool `json:"success"`
 	// the flat-hash of the post-state SSZ bytes, for quickly finding different results.
 	PostHash string `json:"post-hash"`
-	// the client-name name of the client; 'zrnt', 'lighthouse', etc.
+	// the name of the client; 'zrnt', 'lighthouse', etc.
 	ClientName string `json:"client-name"`
 	// the version number of the client, may contain a git commit hash
 	ClientVersion string `json:"client-version"`
 	// identifies the transition task
 	Key string `json:"key"`
+	// Result files
+	Files ResultFilesData `json:"files"`
 }
 
-type ResultResponseMsg struct {
-	PostStateURL string `json:"post-state"`
-	ErrLogURL    string `json:"err-log"`
-	OutLogURL    string `json:"out-log"`
+type ResultFilesData struct {
+	// bucket
+	Bucket string `json:"bucket"`
+	// object path within bucket
+	PostState string `json:"post-state"`
+	ErrLog    string `json:"err-log"`
+	OutLog    string `json:"out-log"`
 }
 
-func Results(w http.ResponseWriter, r *http.Request) {
-	// TODO check client auth
+// PubSubMessage is the payload of a Pub/Sub event.
+type PubSubMessage struct {
+	Data []byte
+}
 
-	dec := json.NewDecoder(r.Body)
+// Client auth is checked by configuring the cloud function
+// to only consume messages from a topic specific to the client.
+// And setting the ETH2_CLIENT_NAME environment var.
+func Results(ctx context.Context, m *pubsub.Message) error {
+	dec := json.NewDecoder(bytes.NewReader(m.Data))
 	var result ResultMsg
-	if SERVER_BAD_INPUT.Check(w, dec.Decode(&result), "could not decode result input") {
-		return
+	if err := dec.Decode(&result); err != nil {
+		return fmt.Errorf("could not decode result input: %v", err)
 	}
-
 	if !RootRegex.Match([]byte(result.PostHash)) {
-		SERVER_BAD_INPUT.Report(w, "post hash has invalid format")
-		return
+		return errors.New("post hash has invalid format")
 	}
 
 	if !VersionRegex.Match([]byte(result.ClientVersion)) {
-		SERVER_BAD_INPUT.Report(w, "client version is invalid")
-		return
+		return errors.New("client version is invalid")
 	}
-	if !ClientNameRegex.Match([]byte(result.ClientName)) {
-		SERVER_BAD_INPUT.Report(w, "client name is invalid")
-		return
+	if !CheckClient(result.ClientName) {
+		return errors.New("client name is invalid")
 	}
 	if !KeyRegex.Match([]byte(result.Key)) {
-		SERVER_BAD_INPUT.Report(w, "task key is invalid")
-		return
+		return errors.New("task key is invalid")
 	}
 
 	// checks if the task key exists, and retrieves the task information
 	var task Task
 	{
-		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, _ := context.WithTimeout(ctx, time.Second*5)
 		taskDoc, err := fsTransitionsCollection.Doc(result.Key).Get(ctx)
 		if status.Code(err) == codes.NotFound || (err == nil && !taskDoc.Exists()) {
-			SERVER_BAD_INPUT.Report(w, "task does not exist, cannot process result")
-			return
+			return errors.New("task does not exist, cannot process result")
 		}
-		if SERVER_ERR.Check(w, err, "failed to lookup task") {
-			return
+		if err != nil {
+			return fmt.Errorf("failed to lookup task: %v", err)
 		}
-		if SERVER_ERR.Check(w, taskDoc.DataTo(&task), "failed to parse task") {
-			return
+		if err := taskDoc.DataTo(&task); err != nil {
+			return fmt.Errorf("failed to parse task: %v", err)
 		}
 	}
 
 	keyStr := uniqueID()
 	{
-		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, _ := context.WithTimeout(ctx, time.Second*5)
 		mergeData := map[string]interface{}{
 			"results": map[string]ResultEntry{
 				keyStr: {
@@ -153,6 +156,11 @@ func Results(w http.ResponseWriter, r *http.Request) {
 					ClientName:    result.ClientName,
 					ClientVersion: result.ClientVersion,
 					PostHash:      result.PostHash,
+					Files: ResultFilesRef{
+						PostStateURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.PostState),
+						OutLogURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.OutLog),
+						ErrLogURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.ErrLog),
+					},
 				},
 			},
 			"workers-versioned": map[string]string{
@@ -165,39 +173,11 @@ func Results(w http.ResponseWriter, r *http.Request) {
 		if !result.Success {
 			mergeData["has-fail"] = true
 		}
-		_, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, mergeData, firestore.MergeAll)
-
-		if SERVER_ERR.Check(w, err, "failed to register result.") {
-			return
+		if _, err := fsTransitionsCollection.Doc(result.Key).Set(ctx, mergeData, firestore.MergeAll); err != nil {
+			return fmt.Errorf("failed to register result: %v", err)
 		}
 	}
-
-	respMsg := new(ResultResponseMsg)
-
-	// create signed urls to upload results to
-	{
-		path := fmt.Sprintf("%s/%s/results/%s/%s/%s", task.SpecVersion, result.Key, result.ClientName, result.ClientVersion, keyStr)
-		var err error
-		respMsg.PostStateURL, err = createSignedStoragePutUrl(path + "/post.ssz")
-		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
-			return
-		}
-		respMsg.ErrLogURL, err = createSignedStoragePutUrl(path + "/err_log.txt")
-		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
-			return
-		}
-		respMsg.OutLogURL, err = createSignedStoragePutUrl(path + "/out_log.txt")
-		if SERVER_ERR.Check(w, err, "could not create signed post state url") {
-			return
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(int(SERVER_OK))
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(respMsg); err != nil {
-		log.Printf("could not encode response for task %s, result %s: %v", result.Key, keyStr, err)
-	}
+	return nil
 }
 
 func uniqueID() string {
