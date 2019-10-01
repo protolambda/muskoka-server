@@ -8,6 +8,8 @@ API for querying tasks and the corresponding results.
 - `limit=<int>`: maximum number of results to return. Will be `min(user_limit, hard_limit)` in practice.
 - `order=<order>`: sorting order. Options: `created-asc`, `created-desc` (default)
 - `spec-version=<string>`: spec version to filter for
+- `has-fail=<bool>`: to only list results that had a non-success result.
+- `with-files=<bool>`: to add file urls to the resulting tasks.
 - `client-<client-name>=<client-version | all>`: only show tasks with results for the given client, and only the specified version.
    Repeat the parameter to query for multiple clients or versions. 'all' can be used as a catch-all for versions.
 

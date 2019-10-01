@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -51,12 +52,20 @@ type ResultEntry struct {
 	ClientName    string    `firestore:"client-name" json:"client-name"`
 	ClientVersion string    `firestore:"client-version" json:"client-version"`
 	PostHash      string    `firestore:"post-hash" json:"post-hash"`
+	Files         ResultFilesRef `firestore:"files" json:"files"`
 }
 
-// TODO: implement new client-name @ version query option
+type ResultFilesRef struct {
+	PostStateURL string `firestore:"post-state-url" json:"post-state"`
+	ErrLogURL    string `firestore:"err-log-url" json:"err-log"`
+	OutLogURL    string `firestore:"out-log-url" json:"out-log"`
+}
+
 func Listing(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 	q := fsTransitionsCollection.Query
+	// do not select "workers" or "workers-versioned" helper fields.
+	selectedKeys := []string{"blocks", "spec-version", "spec-config", "created", "results"}
 	// paginate forwards by continuing after a given result
 	if p, ok := params["after"]; ok && len(p) > 0 {
 		q = q.StartAfter(p[0])
@@ -96,31 +105,36 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	if p, ok := params["has-fail"]; ok && len(p) > 0 && p[0] == "true" {
 		q = q.Where("has-fail", "==", true)
 	}
+	if p, ok := params["with-files"]; ok && len(p) > 0 && p[0] == "true" {
+		selectedKeys = append(selectedKeys, "files")
+	}
 	if p, ok := params["spec-version"]; ok && len(p) > 0 {
 		q = q.Where("spec-version", "==", p[0])
 	}
 	if p, ok := params["spec-config"]; ok && len(p) > 0 {
 		q = q.Where("spec-config", "==", p[0])
 	}
-	if p, ok := params["client-name"]; ok && len(p) > 0 {
-		if !ClientNameRegex.Match([]byte(p[0])) {
-			SERVER_BAD_INPUT.Report(w, "client name is invalid")
-			return
-		}
-		if p2, ok := params["client-version"]; ok && len(p2) > 0 {
-			if !VersionRegex.Match([]byte(p2[0])) {
-				SERVER_BAD_INPUT.Report(w, "client version is invalid")
+	for k, v := range params {
+		if strings.HasPrefix(k, "client-") {
+			clientName := k[len("client-"):]
+			if !ClientNameRegex.Match([]byte(clientName)) {
+				SERVER_BAD_INPUT.Report(w, "client name is invalid")
 				return
 			}
-			// look for the specific version
-			q = q.WherePath([]string{"workers-versioned", p[0]}, "==", p2[0])
-		} else {
-			// just that the key is present.
-			q = q.WherePath([]string{"workers", p[0]}, "==", true)
+			if len(v) > 0 && v[0] != "all" {
+				if !VersionRegex.Match([]byte(v[0])) {
+					SERVER_BAD_INPUT.Report(w, "client version is invalid")
+					return
+				}
+				// look for the specific version
+				q = q.WherePath([]string{"workers-versioned", clientName}, "==", v[0])
+			} else {
+				// just that the key is present.
+				q = q.WherePath([]string{"workers", v[0]}, "==", true)
+			}
 		}
 	}
-	// do not select "workers" or "workers-versioned" helper fields.
-	q = q.Select("blocks", "spec-version", "spec-config", "created", "results")
+	q = q.Select(selectedKeys...)
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	docsIter := q.Documents(ctx)
