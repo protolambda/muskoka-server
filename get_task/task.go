@@ -48,6 +48,13 @@ type ResultEntry struct {
 	ClientName    string    `firestore:"client-name" json:"client-name"`
 	ClientVersion string    `firestore:"client-version" json:"client-version"`
 	PostHash      string    `firestore:"post-hash" json:"post-hash"`
+	Files         ResultFilesRef `firestore:"files" json:"files"`
+}
+
+type ResultFilesRef struct {
+	PostStateURL string `firestore:"post-state-url" json:"post-state"`
+	ErrLogURL    string `firestore:"err-log-url" json:"err-log"`
+	OutLogURL    string `firestore:"out-log-url" json:"out-log"`
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
