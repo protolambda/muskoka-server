@@ -27,16 +27,18 @@ API for querying tasks and the corresponding results.
        "created": time,
        "client-name": string,
        "client-version": string,
-       "post-hash": string
+       "post-hash": string,
+       "files": {
+           "post-state": string, // URL to file
+           "err-log": string,  // URL to file
+           "out-log": string,  // URL to file
+        }
     },
     ... more results
   }
 }
 ```
 
-Storage result link formats:
+Storage path format for inputs: `https://storage.googleapis.com/<bucket>/<spec-version>/<key>/{pre.ssz, block_%d.ssz}`
 
-- inputs: `<spec-version>/<key>/{pre.ssz, block_%d.ssz}`
-- results: `<spec-version>/<key>/results/<client-name>/<client-version>/<result-key>/{post.ssz, out_log.txt, err_log.txt}`
-
-Queried on the storage API endpoint: `https://storage.googleapis.com`
+Output files are linked in the results `"files"` data.

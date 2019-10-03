@@ -56,9 +56,9 @@ type ResultEntry struct {
 }
 
 type ResultFilesRef struct {
-	PostStateURL string `firestore:"post-state-url" json:"post-state"`
-	ErrLogURL    string `firestore:"err-log-url" json:"err-log"`
-	OutLogURL    string `firestore:"out-log-url" json:"out-log"`
+	PostStateURL string `firestore:"post-state" json:"post-state"`
+	ErrLogURL    string `firestore:"err-log" json:"err-log"`
+	OutLogURL    string `firestore:"out-log" json:"out-log"`
 }
 
 func Listing(w http.ResponseWriter, r *http.Request) {

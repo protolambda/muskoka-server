@@ -72,9 +72,9 @@ type ResultEntry struct {
 }
 
 type ResultFilesRef struct {
-	PostStateURL string `firestore:"post-state-url"`
-	ErrLogURL    string `firestore:"err-log-url"`
-	OutLogURL    string `firestore:"out-log-url"`
+	PostStateURL string `firestore:"post-state"`
+	ErrLogURL    string `firestore:"err-log"`
+	OutLogURL    string `firestore:"out-log"`
 }
 
 type ResultMsg struct {
@@ -93,9 +93,7 @@ type ResultMsg struct {
 }
 
 type ResultFilesData struct {
-	// bucket
-	Bucket string `json:"bucket"`
-	// object path within bucket
+	// urls to the files
 	PostState string `json:"post-state"`
 	ErrLog    string `json:"err-log"`
 	OutLog    string `json:"out-log"`
@@ -157,9 +155,9 @@ func Results(ctx context.Context, m *pubsub.Message) error {
 					ClientVersion: result.ClientVersion,
 					PostHash:      result.PostHash,
 					Files: ResultFilesRef{
-						PostStateURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.PostState),
-						OutLogURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.OutLog),
-						ErrLogURL: fmt.Sprintf("%s/%s/%s", storageAPI, result.Files.Bucket, result.Files.ErrLog),
+						PostStateURL: result.Files.PostState,
+						OutLogURL: result.Files.OutLog,
+						ErrLogURL: result.Files.ErrLog,
 					},
 				},
 			},
