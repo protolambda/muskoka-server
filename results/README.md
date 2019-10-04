@@ -14,6 +14,9 @@ Results are received as a JSON object:
     - `err-log:string` (URL to file)
     - `out-log:string` (URL to file)
  
+The environment var `MUSKOKA_CLIENT_NAME` must match the `client-name` to be accepted.
+In the future multiple `client-name` inputs may be accepted with other settings.
+
 There results are put into firestore:
   - Same data as JSON input, excl repeat of the task key, the result is merged in as nested data.
   - Result data is merged into `results` value of the targeted task in the `transitions` collection.

@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gorilla/mux"
-	. "github.com/protolambda/muskoka-server/common"
+	. "github.com/protolambda/httphelpers/codes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
 )
 
@@ -43,11 +44,11 @@ type Task struct {
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success" json:"success"`
-	Created       time.Time `firestore:"created" json:"created"`
-	ClientName    string    `firestore:"client-name" json:"client-name"`
-	ClientVersion string    `firestore:"client-version" json:"client-version"`
-	PostHash      string    `firestore:"post-hash" json:"post-hash"`
+	Success       bool           `firestore:"success" json:"success"`
+	Created       time.Time      `firestore:"created" json:"created"`
+	ClientName    string         `firestore:"client-name" json:"client-name"`
+	ClientVersion string         `firestore:"client-version" json:"client-version"`
+	PostHash      string         `firestore:"post-hash" json:"post-hash"`
 	Files         ResultFilesRef `firestore:"files" json:"files"`
 }
 
@@ -56,6 +57,9 @@ type ResultFilesRef struct {
 	ErrLogURL    string `firestore:"err-log-url" json:"err-log"`
 	OutLogURL    string `firestore:"out-log-url" json:"out-log"`
 }
+
+// make sure keys don't start with `__`, or underscores at all
+var KeyRegex, _ = regexp.Compile("^[-0-9a-zA-Z=][-_0-9a-zA-Z=]{0,128}$")
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
 	mVars := mux.Vars(r)

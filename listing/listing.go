@@ -4,11 +4,12 @@ import (
 	"cloud.google.com/go/firestore"
 	"context"
 	"encoding/json"
-	. "github.com/protolambda/muskoka-server/common"
+	. "github.com/protolambda/httphelpers/codes"
 	"google.golang.org/api/iterator"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -47,11 +48,11 @@ type Task struct {
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success" json:"success"`
-	Created       time.Time `firestore:"created" json:"created"`
-	ClientName    string    `firestore:"client-name" json:"client-name"`
-	ClientVersion string    `firestore:"client-version" json:"client-version"`
-	PostHash      string    `firestore:"post-hash" json:"post-hash"`
+	Success       bool           `firestore:"success" json:"success"`
+	Created       time.Time      `firestore:"created" json:"created"`
+	ClientName    string         `firestore:"client-name" json:"client-name"`
+	ClientVersion string         `firestore:"client-version" json:"client-version"`
+	PostHash      string         `firestore:"post-hash" json:"post-hash"`
 	Files         ResultFilesRef `firestore:"files" json:"files"`
 }
 
@@ -60,6 +61,12 @@ type ResultFilesRef struct {
 	ErrLogURL    string `firestore:"err-log" json:"err-log"`
 	OutLogURL    string `firestore:"out-log" json:"out-log"`
 }
+
+// versions are not used as keys in firestore, and may contain dots.
+var VersionRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_.0-9a-zA-Z]{0,128}$")
+
+// make sure client name keys don't start with `__`, or underscores at all, or hyphens
+var ClientNameRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_0-9a-zA-Z]{0,128}$")
 
 func Listing(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
@@ -165,16 +172,16 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	// if newer than 30 seconds -> no cache
 	// otherwise -> cache for 30 seconds
 	if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour * 24 * 7).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour * 24 * 7).Before(time.Now()) {
+		outputList[0].Created.Add(time.Hour*24*7).Before(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Hour*24*7).Before(time.Now()) {
 		w.Header().Set("Cache-Control", "max-age=86400") // 1 day
 	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour * 3).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour * 3).Before(time.Now()) {
+		outputList[0].Created.Add(time.Hour*3).Before(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Hour*3).Before(time.Now()) {
 		w.Header().Set("Cache-Control", "max-age=3600") // 1 hour
 	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Second * 30).After(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Second * 30).After(time.Now()) {
+		outputList[0].Created.Add(time.Second*30).After(time.Now()) &&
+		outputList[len(outputList)-1].Created.Add(time.Second*30).After(time.Now()) {
 		w.Header().Set("Cache-Control", "no-cache") // no cache
 	} else {
 		w.Header().Set("Cache-Control", "max-age=30") // half a minute

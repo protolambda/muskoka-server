@@ -10,16 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	. "github.com/protolambda/muskoka-server/common"
-	//"google.golang.org/api/iam/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"log"
 	"os"
+	"regexp"
 	"time"
 )
-
-const storageAPI = "https://storage.googleapis.com"
 
 // default: every client is denied.
 var CheckClient = func(name string) bool {
@@ -42,8 +39,7 @@ func init() {
 	}
 
 	{
-		if envName := os.Getenv("ETH2_CLIENT_NAME"); envName != "" {
-			// default: every client is denied.
+		if envName := os.Getenv("MUSKOKA_CLIENT_NAME"); envName != "" {
 			CheckClient = func(name string) bool {
 				return name == envName
 			}
@@ -63,11 +59,11 @@ type Task struct {
 }
 
 type ResultEntry struct {
-	Success       bool      `firestore:"success"`
-	Created       time.Time `firestore:"created"`
-	ClientName    string    `firestore:"client-name"`
-	ClientVersion string    `firestore:"client-version"`
-	PostHash      string    `firestore:"post-hash"`
+	Success       bool           `firestore:"success"`
+	Created       time.Time      `firestore:"created"`
+	ClientName    string         `firestore:"client-name"`
+	ClientVersion string         `firestore:"client-version"`
+	PostHash      string         `firestore:"post-hash"`
 	Files         ResultFilesRef `firestore:"files"`
 }
 
@@ -103,6 +99,15 @@ type ResultFilesData struct {
 type PubSubMessage struct {
 	Data []byte
 }
+
+// versions are not used as keys in firestore, and may contain dots.
+var VersionRegex, _ = regexp.Compile("^[0-9a-zA-Z][-_.0-9a-zA-Z]{0,128}$")
+
+// make sure keys don't start with `__`, or underscores at all
+var KeyRegex, _ = regexp.Compile("^[-0-9a-zA-Z=][-_0-9a-zA-Z=]{0,128}$")
+
+// hex encoded bytes32, with 0x prefix
+var RootRegex, _ = regexp.Compile("^0x[0-9a-f]{64}$")
 
 // Client auth is checked by configuring the cloud function
 // to only consume messages from a topic specific to the client.
@@ -156,8 +161,8 @@ func Results(ctx context.Context, m *pubsub.Message) error {
 					PostHash:      result.PostHash,
 					Files: ResultFilesRef{
 						PostStateURL: result.Files.PostState,
-						OutLogURL: result.Files.OutLog,
-						ErrLogURL: result.Files.ErrLog,
+						OutLogURL:    result.Files.OutLog,
+						ErrLogURL:    result.Files.ErrLog,
 					},
 				},
 			},

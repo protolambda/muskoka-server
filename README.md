@@ -58,19 +58,38 @@ export SPEC_VERSION=v0.8.3
 export SPEC_CONFIG=minimal
 
 # Create an input topic
-gcloud pubsub topics create transition~$SPEC_VERSION~SPEC_CONFIG
+gcloud pubsub topics create transition~$SPEC_VERSION~$SPEC_CONFIG
 
 export CLIENT_NAME=eth2team
 export WORKER_ID=worker1
 
 # Create a subscription for a team worker node (this creates a PULL subscription, with a 100 second ACK time, and 20 min message retention time)
-gcloud pubsub subscriptions create $SPEC_VERSION~$SPEC_CONFIG~$CLIENT_NAME~$WORKER_ID --ack-deadline=100 --message-retention-duration=1200 --topic transition~$SPEC_VERSION~SPEC_CONFIG
+gcloud pubsub subscriptions create $SPEC_VERSION~$SPEC_CONFIG~$CLIENT_NAME~$WORKER_ID --ack-deadline=100 --message-retention-duration=1200 --topic transition~$SPEC_VERSION~$SPEC_CONFIG
+
+# Create an output topic for each team
+gcloud pubsub topics create results~$CLIENT_NAME
 
 
 # Firestore
 # ==========================================
 
 # Collections and documented are automatically created, no setup requirements here
+
+
+# Cloud functions
+# ==========================================
+
+# Collect results for each client team in a separate Go cloud func for independent and isolated permission/upgrade management.
+(cd results && gcloud functions deploy results --entry-point=Results --memory=128M --runtime=go111 --trigger-topic results~$CLIENT_NAME --set-env-vars MUSKOKA_CLIENT_NAME=$CLIENT_NAME)
+
+# Process transition uploads
+(cd upload && gcloud functions deploy upload --entry-point=Upload --memory=128M --runtime=go111 --trigger-http)
+
+# Serve Task retrievals
+(cd get_task && gcloud functions deploy task --entrypoint=GetTask Results --memory=128M --runtime=go111 --trigger-http)
+
+# Serve Task searches
+(cd listing && gcloud functions deploy listing --entrypoint=Listing --memory=128M --runtime=go111 --trigger-http)
 
 
 # IAM
@@ -86,8 +105,8 @@ gcloud beta iam service-accounts create $CLIENT_SERV_ACC \
     --display-name "Client $CLIENT_NAME"
 
 # Create a key-file for the service account
-gcloud iam service-accounts keys create ~/key_.json \
-  --iam-account [SA-NAME]@[PROJECT-ID].iam.gserviceaccount.com
+gcloud iam service-accounts keys create service_account_$CLIENT_SERV_ACC.key.json \
+  --iam-account $CLIENT_SERV_ACC@$GCP_PROJECT.iam.gserviceaccount.com
 
 # Allow the service account to write to the team storage
 # gsutil iam ch [MEMBER_TYPE]:[MEMBER_NAME]:[IAM_ROLE] gs://[BUCKET_NAME]
@@ -95,7 +114,12 @@ gsutil iam ch serviceAccount:$CLIENT_SERV_ACC@$GCP_PROJECT.iam.gserviceaccount.c
 
 
 # Pubsub and function access permissions are best managed through the google cloud web console
-# Pubsub: select subscription -> Permissions -> Add member -> service account name
+
+# Pubsub: 
+    Fore each team:
+    - select inputs subscription -> Permissions -> Add member -> service account name
+    - select outputs topic -> Permissions -> Add member -> service account name
+
 # Functions: select function -> Permissions -> Add member -> service account name
 ```
 

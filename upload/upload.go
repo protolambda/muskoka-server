@@ -8,7 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	. "github.com/protolambda/muskoka-server/common"
+	. "github.com/protolambda/httphelpers/codes"
 	"io"
 	"log"
 	"mime/multipart"
