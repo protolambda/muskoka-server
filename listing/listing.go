@@ -57,9 +57,9 @@ type ResultEntry struct {
 }
 
 type ResultFilesRef struct {
-	PostStateURL string `firestore:"post-state" json:"post-state"`
-	ErrLogURL    string `firestore:"err-log" json:"err-log"`
-	OutLogURL    string `firestore:"out-log" json:"out-log"`
+	PostState string `firestore:"post-state" json:"post-state"`
+	ErrLog    string `firestore:"err-log" json:"err-log"`
+	OutLog    string `firestore:"out-log" json:"out-log"`
 }
 
 // versions are not used as keys in firestore, and may contain dots.

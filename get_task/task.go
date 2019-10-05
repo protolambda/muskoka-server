@@ -53,9 +53,9 @@ type ResultEntry struct {
 }
 
 type ResultFilesRef struct {
-	PostStateURL string `firestore:"post-state-url" json:"post-state"`
-	ErrLogURL    string `firestore:"err-log-url" json:"err-log"`
-	OutLogURL    string `firestore:"out-log-url" json:"out-log"`
+	PostState string `firestore:"post-state" json:"post-state"`
+	ErrLog    string `firestore:"err-log" json:"err-log"`
+	OutLog    string `firestore:"out-log" json:"out-log"`
 }
 
 // make sure keys don't start with `__`, or underscores at all
