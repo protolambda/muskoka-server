@@ -112,9 +112,6 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	if p, ok := params["has-fail"]; ok && len(p) > 0 && p[0] == "true" {
 		q = q.Where("has-fail", "==", true)
 	}
-	if p, ok := params["with-files"]; ok && len(p) > 0 && p[0] == "true" {
-		selectedKeys = append(selectedKeys, "files")
-	}
 	if p, ok := params["spec-version"]; ok && len(p) > 0 {
 		q = q.Where("spec-version", "==", p[0])
 	}
