@@ -3,7 +3,6 @@ package main
 import (
 	"cloud.google.com/go/pubsub"
 	"context"
-	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/protolambda/muskoka-server/get_task"
 	"github.com/protolambda/muskoka-server/listing"
@@ -41,9 +40,10 @@ func main() {
 		return false
 	}
 
-	for _, c := range clients {
-		startPubsubListener(fmt.Sprintf("results~%s", c), results.Results)
-	}
+	// for local dev, when pubsub results changes need to be tested locally.
+	//for _, c := range clients {
+	//	startPubsubListener(fmt.Sprintf("results~%s", c), results.Results)
+	//}
 
 	fs := http.FileServer(http.Dir("static"))
 
