@@ -82,11 +82,11 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	dat, err := fsTransitionsCollection.Doc(key).Get(ctx)
-	if status.Code(err) == codes.NotFound || !dat.Exists() {
+	if status.Code(err) == codes.NotFound || (err == nil && !dat.Exists()) {
 		w.WriteHeader(404)
 		return
 	}
-	if SERVER_ERR.Check(w, err, "could not get key") {
+	if SERVER_ERR.Check(w, err, "could not get task by key") {
 		return
 	}
 	var task Task
