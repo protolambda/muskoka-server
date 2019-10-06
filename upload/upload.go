@@ -83,7 +83,9 @@ type UploadResponse struct {
 	Key string `json:"key"`
 }
 
-var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-]")
+var versionRegex, _ = regexp.Compile("[a-zA-Z0-9.-_]")
+
+var configRegex, _ = regexp.Compile("[a-zA-Z0-9-_]")
 
 func Upload(w http.ResponseWriter, r *http.Request) {
 	specVersion := r.FormValue("spec-version")
@@ -106,6 +108,10 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if !versionRegex.Match([]byte(specVersion)) {
 		SERVER_BAD_INPUT.Report(w, "spec version is invalid")
+		return
+	}
+	if !configRegex.Match([]byte(specConfig)) {
+		SERVER_BAD_INPUT.Report(w, "spec config name is invalid")
 		return
 	}
 	err := r.ParseMultipartForm(maxUploadMem)
@@ -173,14 +179,14 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	// parse and store header
 	preUpload := r.MultipartForm.File["pre"][0]
 	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
-	if SERVER_ERR.Check(w, copyUploadToBucket(preUpload, specVersion+"/"+keyStr+"/pre.ssz"),
+	if SERVER_ERR.Check(w, copyUploadToBucket(preUpload, specVersion+"/"+specConfig+"/"+keyStr+"/pre.ssz"),
 		"could not store pre-state") {
 		return
 	}
 	// parse and store blocks
 	for i, b := range blocks {
 		log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
-		if SERVER_ERR.Check(w, copyUploadToBucket(b, specVersion+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
+		if SERVER_ERR.Check(w, copyUploadToBucket(b, specVersion+"/"+specConfig+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
 			fmt.Sprintf("could not store block %d", err)) {
 			return
 		}
