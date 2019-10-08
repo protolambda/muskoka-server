@@ -32,6 +32,7 @@ func init() {
 }
 
 type Task struct {
+	Index       int                    `firestore:"index" json:"index"`
 	Blocks      int                    `firestore:"blocks" json:"blocks"`
 	SpecVersion string                 `firestore:"spec-version" json:"spec-version"`
 	SpecConfig  string                 `firestore:"spec-config" json:"spec-config"`

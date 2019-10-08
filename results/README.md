@@ -3,6 +3,7 @@
 Cloud func that receives results from a pubsub topic.
 
 Results are received as a JSON object:
+ - `index:int` (for pagination purposes)
  - `success:bool`
  - `post-hash:string`
  - `state-root:hex-string`

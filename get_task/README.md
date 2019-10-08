@@ -9,6 +9,7 @@ API for getting a single task.
 
 ```
 {
+  "index": int,
   "blocks": int,
   "spec-version": string,
   "created": time,

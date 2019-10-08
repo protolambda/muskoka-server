@@ -22,7 +22,9 @@ import (
 
 var inputsBucket *storage.BucketHandle
 var pubSubClient *pubsub.Client
+var firestoreClient *firestore.Client
 var fsTransitionsCollection *firestore.CollectionRef
+var fsTaskIndexRef *firestore.DocumentRef
 
 func init() {
 	projectID := os.Getenv("GCP_PROJECT")
@@ -35,6 +37,7 @@ func init() {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
 		fsTransitionsCollection = firestoreClient.Collection("transitions")
+		fsTaskIndexRef = firestoreClient.Collection("transitions-meta").Doc("next-index")
 	}
 
 	// pubsub
@@ -65,6 +68,7 @@ func init() {
 const maxUploadMem = 10 * (1 << 20)
 
 type Task struct {
+	Index       int       `firestore:"index"`
 	Blocks      int       `firestore:"blocks"`
 	SpecVersion string    `firestore:"spec-version"`
 	SpecConfig  string    `firestore:"spec-config"`
@@ -195,14 +199,37 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	// store task in firestore
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		task := &Task{
-			Blocks:      len(blocks),
-			SpecVersion: specVersion,
-			SpecConfig:  specConfig,
-			Created:     time.Now(),
-		}
-		_, err := doc.Set(ctx, task)
-
+		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+			// read the next index
+			indexDoc, err := tx.Get(fsTaskIndexRef)
+			if err != nil {
+				return err
+			}
+			var index int
+			if indexDoc.Exists() {
+				if err := indexDoc.DataTo(&index); err != nil {
+					return err
+				}
+			} else {
+				index = 0
+			}
+			// increment the index
+			if err := tx.Set(fsTaskIndexRef, index+1); err != nil {
+				return err
+			}
+			// create the task with the previously read ID
+			task := &Task{
+				Index:       index,
+				Blocks:      len(blocks),
+				SpecVersion: specVersion,
+				SpecConfig:  specConfig,
+				Created:     time.Now(),
+			}
+			if err := tx.Set(doc, task); err != nil {
+				return err
+			}
+			return nil
+		})
 		if SERVER_ERR.Check(w, err, "failed to register task.") {
 			return
 		}
