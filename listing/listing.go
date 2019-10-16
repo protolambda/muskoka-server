@@ -7,6 +7,8 @@ import (
 	"fmt"
 	. "github.com/protolambda/httphelpers/codes"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"log"
 	"net/http"
 	"os"
@@ -147,22 +149,21 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	// do not select "workers" or "workers-versioned" helper fields.
 	q = q.Select("blocks", "spec-version", "spec-config", "created", "results", "index")
 
-	var maxIndex int
+	maxIndex := 0
 	outputList := make([]Task, 0)
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 			// read the next index
 			indexDoc, err := tx.Get(fsTaskIndexRef)
-			if err != nil {
+			if status.Code(err) == codes.NotFound || (err == nil && !indexDoc.Exists()) {
+				maxIndex = 0
+			} else if err != nil {
 				return err
-			}
-			if indexDoc.Exists() {
+			} else {
 				if err := indexDoc.DataTo(&maxIndex); err != nil {
 					return err
 				}
-			} else {
-				maxIndex = 0
 			}
 			// no need to query if there are no documents.
 			if maxIndex != 0 {

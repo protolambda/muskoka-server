@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	. "github.com/protolambda/httphelpers/codes"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"log"
 	"mime/multipart"
@@ -203,17 +205,17 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 			// read the next index
 			indexDoc, err := tx.Get(fsTaskIndexRef)
-			if err != nil {
-				return err
-			}
 			var index int
-			if indexDoc.Exists() {
+			if status.Code(err) == codes.NotFound || (err == nil && !indexDoc.Exists()) {
+				index = 0
+			} else if err != nil {
+				return err
+			} else {
 				if err := indexDoc.DataTo(&index); err != nil {
 					return err
 				}
-			} else {
-				index = 0
 			}
+
 			// increment the index
 			if err := tx.Set(fsTaskIndexRef, index+1); err != nil {
 				return err
