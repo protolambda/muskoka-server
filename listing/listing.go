@@ -41,6 +41,10 @@ func init() {
 	}
 }
 
+type TaskIndexDoc struct {
+	NextIndex int `firestore:"next-index"`
+}
+
 type Task struct {
 	Index       int                    `firestore:"index" json:"index"`
 	Blocks      int                    `firestore:"blocks" json:"blocks"`
@@ -71,8 +75,8 @@ type ResultFilesRef struct {
 }
 
 type ListingResult struct {
-	Tasks    []Task `json:"tasks"`
-	MaxIndex int    `json:"max-index"`
+	Tasks          []Task `json:"tasks"`
+	TotalTaskCount int    `json:"total-task-count"`
 }
 
 // versions are not used as keys in firestore, and may contain dots.
@@ -149,7 +153,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	// do not select "workers" or "workers-versioned" helper fields.
 	q = q.Select("blocks", "spec-version", "spec-config", "created", "results", "index")
 
-	maxIndex := 0
+	totalTaskCount := 0
 	outputList := make([]Task, 0)
 	{
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
@@ -157,16 +161,18 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 			// read the next index
 			indexDoc, err := tx.Get(fsTaskIndexRef)
 			if status.Code(err) == codes.NotFound || (err == nil && !indexDoc.Exists()) {
-				maxIndex = 0
+				totalTaskCount = 0
 			} else if err != nil {
 				return err
 			} else {
-				if err := indexDoc.DataTo(&maxIndex); err != nil {
+				var indexContainer TaskIndexDoc
+				if err := indexDoc.DataTo(&indexContainer); err != nil {
 					return err
 				}
+				totalTaskCount = indexContainer.NextIndex
 			}
 			// no need to query if there are no documents.
-			if maxIndex != 0 {
+			if totalTaskCount != 0 {
 				docsIter := tx.Documents(q)
 				for {
 					doc, err := docsIter.Next()
@@ -219,8 +225,8 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
 	res := ListingResult{
-		Tasks:    outputList,
-		MaxIndex: maxIndex,
+		Tasks:          outputList,
+		TotalTaskCount: totalTaskCount,
 	}
 	if err := enc.Encode(&res); err != nil {
 		log.Printf("failed to encode query response to JSON: ")

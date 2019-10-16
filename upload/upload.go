@@ -70,6 +70,10 @@ func init() {
 // 10 MB
 const maxUploadMem = 10 * (1 << 20)
 
+type TaskIndexDoc struct {
+	NextIndex int `firestore:"next-index"`
+}
+
 type Task struct {
 	Index       int       `firestore:"index"`
 	Blocks      int       `firestore:"blocks"`
@@ -205,24 +209,24 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 			// read the next index
 			indexDoc, err := tx.Get(fsTaskIndexRef)
-			var index int
+			var indexContainer TaskIndexDoc
 			if status.Code(err) == codes.NotFound || (err == nil && !indexDoc.Exists()) {
-				index = 0
+				indexContainer.NextIndex = 0
 			} else if err != nil {
 				return err
 			} else {
-				if err := indexDoc.DataTo(&index); err != nil {
+				if err := indexDoc.DataTo(&indexContainer); err != nil {
 					return err
 				}
 			}
 
 			// increment the index
-			if err := tx.Set(fsTaskIndexRef, index+1); err != nil {
+			if err := tx.Set(fsTaskIndexRef, TaskIndexDoc{NextIndex: indexContainer.NextIndex + 1}); err != nil {
 				return err
 			}
 			// create the task with the previously read ID
 			task := &Task{
-				Index:       index,
+				Index:       indexContainer.NextIndex,
 				Blocks:      len(blocks),
 				SpecVersion: specVersion,
 				SpecConfig:  specConfig,
