@@ -156,7 +156,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	totalTaskCount := 0
 	outputList := make([]Task, 0)
 	{
-		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*10)
 		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 			// read the next index
 			indexDoc, err := tx.Get(fsTaskIndexRef)
@@ -231,29 +231,4 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	if err := enc.Encode(&res); err != nil {
 		log.Printf("failed to encode query response to JSON: ")
 	}
-}
-
-func checkHasBefore(q firestore.Query, index int) (bool, error) {
-	return checkContainsOne(q.EndBefore(index))
-}
-
-func checkHasAfter(q firestore.Query, index int) (bool, error) {
-	return checkContainsOne(q.StartAfter(index))
-}
-
-func checkContainsOne(q firestore.Query) (bool, error) {
-	// only care about document existence, not the contents
-	q = q.Select()
-	// 1 item is enough
-	q = q.Limit(1)
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-	docsIter := q.Documents(ctx)
-	_, err := docsIter.Next()
-	if err == iterator.Done {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
