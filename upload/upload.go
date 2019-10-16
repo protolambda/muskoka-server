@@ -32,12 +32,13 @@ func init() {
 
 	// database
 	{
-		firestoreClient, err := firestore.NewClient(ctx, projectID)
+		cl, err := firestore.NewClient(ctx, projectID)
 		if err != nil {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
-		fsTransitionsCollection = firestoreClient.Collection("transitions")
-		fsTaskIndexRef = firestoreClient.Collection("transitions-meta").Doc("next-index")
+		firestoreClient = cl
+		fsTransitionsCollection = cl.Collection("transitions")
+		fsTaskIndexRef = cl.Collection("transitions-meta").Doc("next-index")
 	}
 
 	// pubsub
