@@ -4,6 +4,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"context"
 	"encoding/json"
+	"fmt"
 	. "github.com/protolambda/httphelpers/codes"
 	"google.golang.org/api/iterator"
 	"log"
@@ -15,7 +16,9 @@ import (
 	"time"
 )
 
+var firestoreClient *firestore.Client
 var fsTransitionsCollection *firestore.CollectionRef
+var fsTaskIndexRef *firestore.DocumentRef
 
 var defaultResultsCount = 10
 var maxResultsCount = 20
@@ -26,16 +29,18 @@ func init() {
 
 	// database
 	{
-		firestoreClient, err := firestore.NewClient(ctx, projectID)
+		cl, err := firestore.NewClient(ctx, projectID)
 		if err != nil {
 			log.Fatalf("Failed to create firestore client: %v", err)
 		}
-		fsTransitionsCollection = firestoreClient.Collection("transitions")
+		firestoreClient = cl
+		fsTransitionsCollection = cl.Collection("transitions")
+		fsTaskIndexRef = cl.Collection("transitions-meta").Doc("next-index")
 	}
 }
 
 type Task struct {
-	Index       int                    `firestore:"index"`
+	Index       int                    `firestore:"index" json:"index"`
 	Blocks      int                    `firestore:"blocks" json:"blocks"`
 	SpecVersion string                 `firestore:"spec-version" json:"spec-version"`
 	SpecConfig  string                 `firestore:"spec-config" json:"spec-config"`
@@ -64,9 +69,8 @@ type ResultFilesRef struct {
 }
 
 type ListingResult struct {
-	Tasks       []Task `json:"tasks"`
-	HasPrevPage bool   `json:"has-prev-page"`
-	HasNextPage bool   `json:"has-next-page"`
+	Tasks    []Task `json:"tasks"`
+	MaxIndex int    `json:"max-index"`
 }
 
 // versions are not used as keys in firestore, and may contain dots.
@@ -124,52 +128,66 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// save a copy of the query before imposing boundaries on it
-	noBoundariesQuery := q
-	// paginate forwards by continuing *after* (i.e. excl) a given result
+	// paginate forwards by continuing *after* (i.e. excl) a given index
 	if p, ok := params["after"]; ok && len(p) > 0 {
-		q = q.StartAfter(p[0])
+		afterIndex, err := strconv.ParseUint(p[0], 10, 64)
+		if SERVER_BAD_INPUT.Check(w, err, "invalid after-index") {
+			return
+		}
+		q = q.StartAfter(int(afterIndex))
 	}
-	// paginate backwards by stopping *before* (i.e. excl) a given result
+	// paginate backwards by stopping *before* (i.e. excl) a given index
 	if p, ok := params["before"]; ok && len(p) > 0 {
-		q = q.EndBefore(p[0])
+		beforeIndex, err := strconv.ParseUint(p[0], 10, 64)
+		if SERVER_BAD_INPUT.Check(w, err, "invalid before-index") {
+			return
+		}
+		q = q.EndBefore(beforeIndex)
 	}
 	// do not select "workers" or "workers-versioned" helper fields.
-	q = q.Select("blocks", "spec-version", "spec-config", "created", "results")
+	q = q.Select("blocks", "spec-version", "spec-config", "created", "results", "index")
 
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-	docsIter := q.Documents(ctx)
+	var maxIndex int
 	outputList := make([]Task, 0)
-	for {
-		doc, err := docsIter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if SERVER_ERR.Check(w, err, "could not process query result") {
-			return
-		}
-		i := len(outputList)
-		outputList = append(outputList, Task{})
-		d := doc.Data()
-		log.Printf("data: %v\n", d)
-		if SERVER_ERR.Check(w, doc.DataTo(&outputList[i]), "could not parse result: "+doc.Ref.ID) {
-			return
-		}
-		outputList[i].Key = doc.Ref.ID
-	}
-	prevPage := false
-	nextPage := false
-	if len(outputList) > 0 {
-		var err error
-		prevPage, err = checkHasBefore(noBoundariesQuery, outputList[0].Index)
-		if SERVER_ERR.Check(w, err, "could not check if there is a previous page of listing data") {
-			return
-		}
-	}
-	if len(outputList) > 0 {
-		var err error
-		nextPage, err = checkHasAfter(noBoundariesQuery, outputList[len(outputList)-1].Index)
-		if SERVER_ERR.Check(w, err, "could not check if there is a next page of listing data") {
+	{
+		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
+		err := firestoreClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+			// read the next index
+			indexDoc, err := tx.Get(fsTaskIndexRef)
+			if err != nil {
+				return err
+			}
+			if indexDoc.Exists() {
+				if err := indexDoc.DataTo(&maxIndex); err != nil {
+					return err
+				}
+			} else {
+				maxIndex = 0
+			}
+			// no need to query if there are no documents.
+			if maxIndex != 0 {
+				docsIter := tx.Documents(q)
+				for {
+					doc, err := docsIter.Next()
+					if err == iterator.Done {
+						break
+					}
+					if err != nil {
+						return err
+					}
+					i := len(outputList)
+					outputList = append(outputList, Task{})
+					d := doc.Data()
+					log.Printf("data: %v\n", d)
+					if err := doc.DataTo(&outputList[i]); err != nil {
+						return fmt.Errorf("could not parse result %s %v", doc.Ref.ID, err)
+					}
+					outputList[i].Key = doc.Ref.ID
+				}
+			}
+			return nil
+		})
+		if SERVER_ERR.Check(w, err, "could not process listing query") {
 			return
 		}
 	}
@@ -200,9 +218,8 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(int(SERVER_OK))
 	enc := json.NewEncoder(w)
 	res := ListingResult{
-		Tasks:       outputList,
-		HasPrevPage: prevPage,
-		HasNextPage: nextPage,
+		Tasks:    outputList,
+		MaxIndex: maxIndex,
 	}
 	if err := enc.Encode(&res); err != nil {
 		log.Printf("failed to encode query response to JSON: ")
