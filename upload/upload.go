@@ -9,6 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	. "github.com/protolambda/httphelpers/codes"
+	"github.com/protolambda/zssz"
+	"github.com/protolambda/zssz-spec-history/mainnet_v0_8_4"
+	"github.com/protolambda/zssz-spec-history/mainnet_v0_9_0"
+	"github.com/protolambda/zssz-spec-history/minimal_v0_8_4"
+	"github.com/protolambda/zssz-spec-history/minimal_v0_9_0"
+	"github.com/protolambda/zssz/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"io"
@@ -187,19 +193,41 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	doc := fsTransitionsCollection.NewDoc()
 	keyStr := doc.ID
 
-	// parse and store header
-	preUpload := r.MultipartForm.File["pre"][0]
-	log.Printf("%s pre upload header: %v", keyStr, preUpload.Header)
-	if SERVER_ERR.Check(w, copyUploadToBucket(preUpload, specVersion+"/"+specConfig+"/"+keyStr+"/pre.ssz"),
-		"could not store pre-state") {
-		return
-	}
-	// parse and store blocks
-	for i, b := range blocks {
-		log.Printf("%s block %d upload header: %v", keyStr, i, b.Header)
-		if SERVER_ERR.Check(w, copyUploadToBucket(b, specVersion+"/"+specConfig+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
-			fmt.Sprintf("could not store block %d", err)) {
+	// check validity
+	{
+		// check pre-state
+		preUpload := r.MultipartForm.File["pre"][0]
+		if err := checkSSZValidity(preUpload, "pre state", "BeaconState", specVersion, specConfig);
+			SERVER_BAD_INPUT.Check(w, err, "invalid pre-state") {
+			_, _ = fmt.Fprintln(w, "")
+			_, _ = fmt.Fprintln(w, err)
 			return
+		}
+		// check blocks
+		for i, b := range blocks {
+			err := checkSSZValidity(b, fmt.Sprintf("block %d", i), "BeaconBlock", specVersion, specConfig)
+			if SERVER_BAD_INPUT.Check(w, err,"invalid block") {
+				_, _ = fmt.Fprintln(w, "")
+				_, _ = fmt.Fprintln(w, err)
+				return
+			}
+		}
+	}
+
+	// store input data
+	{
+		// store pre-state
+		preUpload := r.MultipartForm.File["pre"][0]
+		if SERVER_ERR.Check(w, copyUploadToBucket(preUpload, specVersion+"/"+specConfig+"/"+keyStr+"/pre.ssz"),
+			"could not store pre-state") {
+			return
+		}
+		// store blocks
+		for i, b := range blocks {
+			if SERVER_ERR.Check(w, copyUploadToBucket(b, specVersion+"/"+specConfig+"/"+keyStr+fmt.Sprintf("/block_%d.ssz", i)),
+				"could not store block") {
+				return
+			}
 		}
 	}
 
@@ -283,4 +311,47 @@ func copyUploadToBucket(u *multipart.FileHeader, key string) error {
 		return fmt.Errorf("could not push uploaded data to cloud bucket for %s: %v", key, err)
 	}
 	return nil
+}
+
+var objSSZDefinitions = map[string]map[string]map[string]types.SSZ{
+	"BeaconBlock": {
+		"v0.8.4": {
+			"minimal": minimal_v0_8_4.BeaconBlockSSZ,
+			"mainnet": mainnet_v0_8_4.BeaconBlockSSZ,
+		},
+		"v0.9.0": {
+			"minimal": minimal_v0_9_0.BeaconBlockSSZ,
+			"mainnet": mainnet_v0_9_0.BeaconBlockSSZ,
+		},
+	},
+	"BeaconState": {
+		"v0.8.4": {
+			"minimal": minimal_v0_8_4.BeaconStateSSZ,
+			"mainnet": mainnet_v0_8_4.BeaconStateSSZ,
+		},
+		"v0.9.0": {
+			"minimal": minimal_v0_9_0.BeaconStateSSZ,
+			"mainnet": mainnet_v0_9_0.BeaconStateSSZ,
+		},
+	},
+}
+
+func checkSSZValidity(u *multipart.FileHeader, name string, objType string, specVersion string, specConfig string) error {
+	f, err := u.Open()
+	if err != nil {
+		return fmt.Errorf("could not receive uploaded data for %s: %v", name, err)
+	}
+	byVersionConfig, ok := objSSZDefinitions[objType]
+	if !ok {
+		return fmt.Errorf("cannot recognize object type: %s", objType)
+	}
+	byConfig, ok := byVersionConfig[specVersion]
+	if !ok {
+		return fmt.Errorf("cannot recognize spec version: %s", specVersion)
+	}
+	sszDef, ok := byConfig[specConfig]
+	if !ok {
+		return fmt.Errorf("cannot recognize spec config: %s", specConfig)
+	}
+	return zssz.DryCheck(f, uint64(u.Size), sszDef)
 }
