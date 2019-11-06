@@ -86,10 +86,10 @@ gcloud pubsub topics create results~$CLIENT_NAME
 (cd upload && gcloud functions deploy upload --entry-point=Upload --memory=128M --runtime=go111 --trigger-http)
 
 # Serve Task retrievals
-(cd get_task && gcloud functions deploy task --entrypoint=GetTask Results --memory=128M --runtime=go111 --trigger-http)
+(cd get_task && gcloud functions deploy task --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http)
 
 # Serve Task searches
-(cd listing && gcloud functions deploy listing --entrypoint=Listing --memory=128M --runtime=go111 --trigger-http)
+(cd listing && gcloud functions deploy listing --entry-point=Listing --memory=128M --runtime=go111 --trigger-http)
 
 
 # IAM
