@@ -19,6 +19,7 @@ APIs to activate:
 - Pub/Sub         -- to communicate new tasks and results as events
 - Firestore       -- to track tasks and results
 
+Note: deployments are to europe-west 3 and 2 regions, to keep latency between services low. 
 
 ```bash
 # Set project ID
@@ -80,16 +81,16 @@ gcloud pubsub topics create results~$CLIENT_NAME
 # ==========================================
 
 # Collect results for each client team in a separate Go cloud func for independent and isolated permission/upgrade management.
-(cd results && gcloud functions deploy results --entry-point=Results --memory=128M --runtime=go111 --trigger-topic results~$CLIENT_NAME --set-env-vars MUSKOKA_CLIENT_NAME=$CLIENT_NAME)
+(cd results && gcloud functions deploy results --region=europe-west2 --entry-point=Results --memory=128M --runtime=go111 --trigger-topic results~$CLIENT_NAME --set-env-vars MUSKOKA_CLIENT_NAME=$CLIENT_NAME)
 
 # Process transition uploads
-(cd upload && gcloud functions deploy upload --entry-point=Upload --memory=128M --runtime=go111 --trigger-http)
+(cd upload && gcloud functions deploy upload --region=europe-west2 --entry-point=Upload --memory=128M --runtime=go111 --trigger-http)
 
 # Serve Task retrievals
-(cd get_task && gcloud functions deploy task --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http)
+(cd get_task && gcloud functions deploy task --region=europe-west2 --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http)
 
 # Serve Task searches
-(cd listing && gcloud functions deploy listing --entry-point=Listing --memory=128M --runtime=go111 --trigger-http)
+(cd listing && gcloud functions deploy listing --region=europe-west2 --entry-point=Listing --memory=128M --runtime=go111 --trigger-http)
 
 
 # IAM
@@ -117,8 +118,8 @@ gsutil iam ch serviceAccount:$CLIENT_SERV_ACC@$GCP_PROJECT.iam.gserviceaccount.c
 
 # Pubsub: 
     Fore each team:
-    - select inputs subscription -> Permissions -> Add member -> service account name
-    - select outputs topic -> Permissions -> Add member -> service account name
+    - select inputs subscription -> Permissions -> Add member -> service account name, add roles: Pub/Sub Viewer, Pub/Sub Subscriber
+    - select outputs topic -> Permissions -> Add member -> service account name, add roles: Pub/Sub Viewer, Pub/Sub Publisher
 
 # Functions: select function -> Permissions -> Add member -> service account name
 ```
