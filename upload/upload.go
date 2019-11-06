@@ -315,6 +315,11 @@ func copyUploadToBucket(u *multipart.FileHeader, key string) error {
 
 var objSSZDefinitions = map[string]map[string]map[string]types.SSZ{
 	"BeaconBlock": {
+		"v0.8.3": {
+			// Same as v0.8.4
+			"minimal": minimal_v0_8_4.BeaconBlockSSZ,
+			"mainnet": mainnet_v0_8_4.BeaconBlockSSZ,
+		},
 		"v0.8.4": {
 			"minimal": minimal_v0_8_4.BeaconBlockSSZ,
 			"mainnet": mainnet_v0_8_4.BeaconBlockSSZ,
@@ -325,6 +330,11 @@ var objSSZDefinitions = map[string]map[string]map[string]types.SSZ{
 		},
 	},
 	"BeaconState": {
+		"v0.8.3": {
+			// Same as v0.8.4
+			"minimal": minimal_v0_8_4.BeaconStateSSZ,
+			"mainnet": mainnet_v0_8_4.BeaconStateSSZ,
+		},
 		"v0.8.4": {
 			"minimal": minimal_v0_8_4.BeaconStateSSZ,
 			"mainnet": mainnet_v0_8_4.BeaconStateSSZ,
