@@ -62,6 +62,7 @@ github.com/protolambda/zssz-spec-history v0.0.1 h1:ID85Ei3FnHPhIuV8uWKNgHmn4H9rU
 github.com/protolambda/zssz-spec-history v0.0.1/go.mod h1:NqnZomPPM0anZvl2bgQ9xYPueMIu0z/OvPtInWETvgw=
 github.com/protolambda/zssz-spec-history v0.0.2 h1:HUnwrX+qYIuhUtsyeBKgWo/61Bw5fUh0KaxdDOdFx2Y=
 github.com/protolambda/zssz-spec-history v0.0.2/go.mod h1:NqnZomPPM0anZvl2bgQ9xYPueMIu0z/OvPtInWETvgw=
+github.com/protolambda/zssz-spec-history v0.1.0/go.mod h1:NqnZomPPM0anZvl2bgQ9xYPueMIu0z/OvPtInWETvgw=
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
