@@ -19,7 +19,8 @@ APIs to activate:
 - Pub/Sub         -- to communicate new tasks and results as events
 - Firestore       -- to track tasks and results
 
-Note: deployments are to europe-west 3 and 2 regions, to keep latency between services low. 
+Note: deployments are to europe-west 3 and 2 regions, to keep latency between services low.
+However, the HTTP functions are an exception, firebase only works with `us-central1` region cloud functions sadly. 
 
 ```bash
 # Set project ID
@@ -84,13 +85,13 @@ gcloud pubsub topics create results~$CLIENT_NAME
 (cd results && gcloud functions deploy results --region=europe-west2 --entry-point=Results --memory=128M --runtime=go111 --trigger-topic results~$CLIENT_NAME --set-env-vars MUSKOKA_CLIENT_NAME=$CLIENT_NAME)
 
 # Process transition uploads
-(cd upload && gcloud functions deploy upload --region=europe-west2 --entry-point=Upload --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
+(cd upload && gcloud functions deploy upload --region=us-central1 --entry-point=Upload --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 # Serve Task retrievals
-(cd get_task && gcloud functions deploy task --region=europe-west2 --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
+(cd get_task && gcloud functions deploy task --region=us-central1 --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 # Serve Task searches
-(cd listing && gcloud functions deploy listing --region=europe-west2 --entry-point=Listing --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
+(cd listing && gcloud functions deploy listing --region=us-central1 --entry-point=Listing --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 
 # IAM
