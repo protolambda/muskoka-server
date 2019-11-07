@@ -84,13 +84,13 @@ gcloud pubsub topics create results~$CLIENT_NAME
 (cd results && gcloud functions deploy results --region=europe-west2 --entry-point=Results --memory=128M --runtime=go111 --trigger-topic results~$CLIENT_NAME --set-env-vars MUSKOKA_CLIENT_NAME=$CLIENT_NAME)
 
 # Process transition uploads
-(cd upload && gcloud functions deploy upload --region=europe-west2 --entry-point=Upload --memory=128M --runtime=go111 --trigger-http)
+(cd upload && gcloud functions deploy upload --region=europe-west2 --entry-point=Upload --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 # Serve Task retrievals
-(cd get_task && gcloud functions deploy task --region=europe-west2 --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http)
+(cd get_task && gcloud functions deploy task --region=europe-west2 --entry-point=GetTask --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 # Serve Task searches
-(cd listing && gcloud functions deploy listing --region=europe-west2 --entry-point=Listing --memory=128M --runtime=go111 --trigger-http)
+(cd listing && gcloud functions deploy listing --region=europe-west2 --entry-point=Listing --memory=128M --runtime=go111 --trigger-http --allow-unauthenticated)
 
 
 # IAM
