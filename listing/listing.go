@@ -130,7 +130,7 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 				q = q.WherePath([]string{"workers-versioned", clientName}, "==", v[0])
 			} else {
 				// just that the key is present.
-				q = q.WherePath([]string{"workers", v[0]}, "==", true)
+				q = q.WherePath([]string{"workers", clientName}, "==", true)
 			}
 		}
 	}
