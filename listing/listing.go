@@ -200,26 +200,28 @@ func Listing(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 
-	// Experimental caching to make repeated scrolls through historical data by the same viewers cheaper.
-	//  Lengths/triggers can be tweaked.
-	// if older than a week -> cache for a day
-	// if older than 3 hours -> cache for an hour
-	// if newer than 30 seconds -> no cache
-	// otherwise -> cache for 30 seconds
-	if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour * 24 * 7).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour * 24 * 7).Before(time.Now()) {
-		w.Header().Set("Cache-Control", "max-age=86400") // 1 day
-	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Hour * 3).Before(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Hour * 3).Before(time.Now()) {
-		w.Header().Set("Cache-Control", "max-age=3600") // 1 hour
-	} else if len(outputList) > 0 &&
-		outputList[0].Created.Add(time.Second * 30).After(time.Now()) &&
-		outputList[len(outputList)-1].Created.Add(time.Second * 30).After(time.Now()) {
-		w.Header().Set("Cache-Control", "no-cache") // no cache
+	// if there are any results, and they are not the very latest entries, then try to cache.
+	if len(outputList) > 0 && outputList[0].Index+maxResultsCount < totalTaskCount {
+		// Experimental caching to make repeated scrolls through historical data by the same viewers cheaper.
+		//  Lengths/triggers can be tweaked.
+		// if older than a week -> cache for a day
+		// if older than 3 hours -> cache for an hour
+		// if newer than 30 seconds -> no cache
+		// otherwise -> cache for 30 seconds
+		if outputList[0].Created.Add(time.Hour * 24 * 7).Before(time.Now()) &&
+			outputList[len(outputList)-1].Created.Add(time.Hour * 24 * 7).Before(time.Now()) {
+			w.Header().Set("Cache-Control", "max-age=86400") // 1 day
+		} else if outputList[0].Created.Add(time.Hour * 3).Before(time.Now()) &&
+			outputList[len(outputList)-1].Created.Add(time.Hour * 3).Before(time.Now()) {
+			w.Header().Set("Cache-Control", "max-age=3600") // 1 hour
+		} else if outputList[0].Created.Add(time.Second * 30).After(time.Now()) &&
+			outputList[len(outputList)-1].Created.Add(time.Second * 30).After(time.Now()) {
+			w.Header().Set("Cache-Control", "no-cache") // no cache
+		} else {
+			w.Header().Set("Cache-Control", "max-age=30") // half a minute
+		}
 	} else {
-		w.Header().Set("Cache-Control", "max-age=30") // half a minute
+		w.Header().Set("Cache-Control", "no-cache") // no cache
 	}
 
 	w.WriteHeader(int(SERVER_OK))
